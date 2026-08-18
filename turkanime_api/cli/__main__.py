@@ -27,6 +27,7 @@ except ImportError:
 from ..bypass import fetch
 from .. import bypass, animedepo
 from .. import objects as turkanime
+from .. import animecix
 from .dosyalar import Dosyalar
 from .gereksinimler import gereksinim_kontrol_cli
 from .cli_tools import prompt_tema,clear,indirme_task_cli,VidSearchCLI,CliStatus,DownloadBoard,player_onceligi,player_onceligi_duzenle,player_onceligi_uygula
@@ -44,8 +45,11 @@ def provider_sec(yeni_provider):
     provider = yeni_provider
     Anime, Bolum = provider.Anime, provider.Bolum
 
-
-provider_sec(animedepo if USE_ANIMEDEPO else turkanime)
+# Default to animecix
+try:
+    provider_sec(animecix)
+except Exception:
+    provider_sec(animedepo)  # fallback
 
 # Uygulama dizinini sistem PATH'ına ekle.
 SEP = ";" if name=="nt" else ":"
@@ -119,6 +123,29 @@ def son_anime_sec(dosya):
     return secim or ("geri",None)
 
 
+def search_all_providers(query):
+    """Search across all providers and return list of (slug, title, provider_name)."""
+    results = []
+    for prov in [animedepo, turkanime, animecix]:
+        try:
+            res = prov.Anime.arama_yap(query)
+            if res:
+                for slug, title in res:
+                    results.append((slug, title, prov.__name__))
+        except Exception:
+            continue
+    # Deduplicate by title (keep first)
+    seen = set()
+    unique = []
+    for slug, title, prov_name in results:
+        if title not in seen:
+            seen.add(title)
+            unique.append((slug, title, prov_name))
+    # Sort so animecix appears first
+    unique.sort(key=lambda x: 0 if x[2] == "animecix" else 1)
+    return unique
+
+
 def menu_loop():
     while True:
         clear()
@@ -140,48 +167,48 @@ def menu_loop():
             if secim == "geri":
                 continue
             if secim == "ara":
-                try:
-                    if provider is animedepo or SEARCH_FALLBACK:
-                        # Anime listesi.json üstünden autocomplete seçim yaptıran eski kod.
-                        with CliStatus("Anime listesi getiriliyor.."):
-                            animeler = animedepo.Anime.get_anime_listesi()
-                        seri_ismi = qa.autocomplete(
-                            'Animeyi yazın',
-                            choices = [n for s,n in animeler],
-                            style = prompt_tema
-                        ).ask()
-                    else:
-                        # Seriyi seç.
-                        arama_metni = qa.text(
-                            'Animeyi yazın',
-                            style=prompt_tema
-                        ).ask()
-                        if not arama_metni:
-                            continue
-                        # Manuel anime araması yap.
-                        with CliStatus(f"'{arama_metni}' için sitede aranıyor.."):
-                            animeler = Anime.arama_yap(arama_metni)
-                        if not animeler:
-                            raise IndexError
-                        seri_ismi = qa.select(
-                            'Bulunan sonuçlardan birini seçin:',
-                            choices = [n for s, n in animeler],
-                            style = prompt_tema,
-                            instruction="(Ok tuşlarını kullan)"
-                        ).ask()
-                    if seri_ismi is None:
-                        continue
-                    seri_slug = [s for s,n in animeler if n==seri_ismi][0]
-                except (KeyError,IndexError):
+                arama_metni = qa.text(
+                    'Animeyi yazın',
+                    style=prompt_tema
+                ).ask()
+                if not arama_metni:
+                    continue
+                with CliStatus(f"'{arama_metni}' için tüm kaynaklarda aranıyor.."):
+                    all_results = search_all_providers(arama_metni)
+                if not all_results:
                     rprint("[red][strong]Aradığınız anime bulunamadı.[/strong][/red]")
                     sleep(1.5)
                     continue
-                except Exception as e: #FIXME: Fazla genel exception.
-                    log_error(e)
-                    rprint("[red][strong]Arama yapılırken bir hata oluştu.[/strong][/red]")
-                    sleep(1.5)
+
+                choices = [qa.Choice(f"{title} ({prov})", (slug, prov)) for slug, title, prov in all_results]
+                selected = qa.select(
+                    'Bulunan sonuçlardan birini seçin:',
+                    choices=choices,
+                    style=prompt_tema,
+                    instruction="(Ok tuşlarını kullan)"
+                ).ask()
+                if selected is None:
                     continue
-                dosya.set_last_anime(seri_slug,seri_ismi)
+                seri_slug, selected_provider = selected
+                # Set provider to the selected one
+                if selected_provider == "animedepo":
+                    provider_sec(animedepo)
+                elif selected_provider == "turkanime":
+                    provider_sec(turkanime)
+                elif selected_provider == "animecix":
+                    provider_sec(animecix)
+                else:
+                    provider_sec(animecix)  # fallback
+                # Save last anime with title
+                for s, t, p in all_results:
+                    if s == seri_slug:
+                        dosya.set_last_anime(seri_slug, t)
+                        break
+            else:
+                # Continue with last anime – use current provider (which may be from previous selection)
+                pass
+
+            # Now we have the anime slug and provider set
             anime = Anime(seri_slug)
 
             while True:
@@ -274,7 +301,7 @@ def menu_loop():
                 clear()
                 dosyalar = Dosyalar()
                 ayarlar = dosyalar.ayarlar
-                tr = lambda opt: "AÇIK" if opt else "KAPALI" # Bool to Türkçe
+                tr = lambda opt: "AÇIK" if opt else "KAPALI"
                 ayarlar_options = [
                     'İndirilenler klasörünü seç',
                     'Player önceliğini düzenle',
@@ -334,7 +361,7 @@ def menu_loop():
 
 
 def main():
-    global SEARCH_FALLBACK
+    global SEARCH_FALLBACK, provider, Anime, Bolum
     ayarlar = Dosyalar().ayarlar
     player_onceligi_uygula(ayarlar)
 
@@ -346,7 +373,6 @@ def main():
     except Exception:
         pass
     if manifest.get("turkanime_url"):
-        # Yazarın manifestosu hatalı domain'i zorladığı için devre dışı bırakıldı
         bypass.BASE_URL = "https://www.turkanime.co"
     if manifest.get("animedepo_url"):
         animedepo.BASE_URL = manifest["animedepo_url"]
@@ -359,11 +385,16 @@ def main():
     SEARCH_FALLBACK = (manifest.get("features") or {}).get("search",{}).get("force_fallback",False)
     turkanime_enabled = any(name == "turkanime" for name,_conf in aktifler)
     animedepo.USE_TURKANIME = turkanime_enabled
-    if USE_ANIMEDEPO or ayarlar["AnimeDepo kullanmaya zorla"]:
+
+    # Determine primary provider: prefer animecix if enabled, else fallback
+    if any(name == "animecix" for name, _ in aktifler):
+        provider_sec(animecix)
+    elif any(name == "animedepo" for name, _ in aktifler):
         provider_sec(animedepo)
+    elif any(name == "turkanime" for name, _ in aktifler):
+        provider_sec(turkanime)
     else:
-        provider_name = max(aktifler,key=lambda item:item[1].get("priority",0))[0] if aktifler else "turkanime"
-        provider_sec(animedepo if provider_name == "animedepo" else turkanime)
+        provider_sec(animecix)  # ultimate fallback
 
     # Güncelleme kontrolü
     try:
@@ -379,21 +410,20 @@ def main():
         rprint("[red][strong]Güncelleme kontrol edilemedi.[/strong][red]")
         sleep(3)
 
-
     # Gereksinimleri kontrol et
     gereksinim_kontrol_cli()
 
     # Script herhangi bir sebepten dolayı sonlandırıldığında.
     def kapat():
         with CliStatus("Kapatılıyor.."):
-            sleep(1.5) # Şimdilik placeholder
+            sleep(1.5)
     atexit.register(kapat)
 
     # Türkanime'ye bağlan veya AnimeDepo fallback kullan.
     if provider is turkanime:
         try:
             with CliStatus("Türkanime'ye bağlanılıyor.."):
-                fetch(None) # Create Session
+                fetch(None)
         except Exception as e:
             log_error(e)
             provider_sec(animedepo)

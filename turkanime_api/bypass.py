@@ -7,12 +7,12 @@ from base64 import b64decode
 from hashlib import md5
 
 from Crypto.Cipher import AES
-from curl_cffi import requests
+from curl_cffi import requests as cffi_requests
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # GÜNCELLENDİ: .tv uzantısı genelde banlandığı için aktif olan .co kullanılıyor
-BASE_URL = "https://www.turkanime.co" 
+BASE_URL = "https://www.turkanime.co"
 ECCHICIX_BASE_URL = "https://ecchicix.com"
 ANIMECIX_BASE_URL = "https://animecix.tv"
 
@@ -26,11 +26,21 @@ DEFAULT_HEADERS = {
 _sessions = {}
 session = None
 
+# ----------------------------------------------------------------------
+# NEW: Shared global session – reuses TCP connections across all providers
+# ----------------------------------------------------------------------
+SHARED_SESSION = cffi_requests.Session(impersonate="chrome", timeout=5)
+SHARED_SESSION.headers.update(DEFAULT_HEADERS)
+
+def get_shared_session():
+    return SHARED_SESSION
+# ----------------------------------------------------------------------
+
 def get_session(domain=None):
     global session
     key = domain or BASE_URL
     if key not in _sessions:
-        _sessions[key] = requests.Session(impersonate="chrome", verify=False)
+        _sessions[key] = cffi_requests.Session(impersonate="chrome", verify=False)
     if key == BASE_URL:
         session = _sessions[key]
     return _sessions[key]
@@ -49,9 +59,9 @@ def fetch(path=None, headers=None, data=None, domain=None):
     sess = get_session(domain)
     try:
         if data is not None:
-            resp = sess.post(url, data=data, headers=req_headers, timeout=15)
+            resp = sess.post(url, data=data, headers=req_headers, timeout=5)
         else:
-            resp = sess.get(url, headers=req_headers, timeout=15)
+            resp = sess.get(url, headers=req_headers, timeout=5)
         resp.raise_for_status()
         return resp.text
     except Exception as e:
@@ -86,7 +96,7 @@ def get_real_url(cipher):
 def unmask_real_url(url, video=None):
     sess = get_session()
     try:
-        resp = sess.get(url, headers=DEFAULT_HEADERS, allow_redirects=True, timeout=15)
+        resp = sess.get(url, headers=DEFAULT_HEADERS, allow_redirects=True, timeout=5)
         return resp.url
     except Exception as e:
         logging.error(f"unmask_real_url başarısız ({url}): {e}")
@@ -95,7 +105,7 @@ def unmask_real_url(url, video=None):
 def get_m3u8_stream(url):
     sess = get_session()
     try:
-        resp = sess.get(url, headers=DEFAULT_HEADERS, allow_redirects=True, timeout=15)
+        resp = sess.get(url, headers=DEFAULT_HEADERS, allow_redirects=True, timeout=5)
         return resp.url
     except Exception as e:
         logging.error(f"get_m3u8_stream başarısız ({url}): {e}")

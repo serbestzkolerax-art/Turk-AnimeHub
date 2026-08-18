@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+    <!-- Watchlist Section -->
+    <div id="watchlist-section" class="mb-12 hidden">
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-bold text-gray-100 flex items-center gap-2">
+                <span class="text-indigo-500 text-3xl leading-none">&bull;</span> İzleme Listem
+            </h2>
+            <button onclick="clearWatchlist()" class="text-sm text-gray-400 hover:text-red-400 transition-colors">Listeyi Temizle</button>
+        </div>
+        
+        <div id="watchlist-container" class="flex gap-4 sm:gap-6 overflow-x-auto pb-4 snap-x hide-scrollbar">
+            <!-- Items will be injected by JS -->
+        </div>
+    </div>
+
+{% if results %}
+    <h2 class="text-xl font-bold mb-6 text-gray-200 border-l-4 border-indigo-500 pl-3">Arama Sonuçları: "{{ query }}"</h2>
+    {% if results|length == 0 %}
+        <div class="text-center py-12 text-gray-400">Sonuç bulunamadı.</div>
+    {% else %}
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+        {% for a in results %}
+            <a href="/?slug={{ a[0] }}" class="group relative flex flex-col bg-cardbg rounded-xl overflow-hidden shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 hover:-translate-y-1">
+                <div class="aspect-[3/4] overflow-hidden relative">
+                    <img src="/api/cover?title={{ a[1]|urlencode }}" alt="{{ a[1] }}" loading="lazy" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
+                    <div class="absolute inset-0 bg-gradient-to-t from-darker via-darker/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
+                    <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div class="bg-indigo-600/90 rounded-full p-3 transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                            <svg class="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6z"/></svg>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <h3 class="font-semibold text-sm text-gray-200 group-hover:text-indigo-400 transition-colors line-clamp-2" title="{{ a[1] }}">{{ a[1] }}</h3>
+                </div>
+            </a>
+        {% endfor %}
+        </div>
+    {% endif %}
+{% else %}
+
+    <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold text-gray-100 flex items-center gap-2">
+            <span class="text-indigo-500 text-3xl leading-none">&bull;</span> Popüler Animeler
+        </h2>
+    </div>
+    
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+    {% for a in popular_catalog %}
+        <a href="/?slug={{ a[0] }}" class="group relative flex flex-col bg-cardbg rounded-xl overflow-hidden shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 hover:-translate-y-1">
+            <div class="aspect-[3/4] overflow-hidden relative">
+                <img src="/api/cover?title={{ a[1]|urlencode }}" alt="{{ a[1] }}" loading="lazy" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
+                <div class="absolute inset-0 bg-gradient-to-t from-darker via-darker/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
+                <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <div class="bg-indigo-600/90 rounded-full p-3 transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                        <svg class="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div class="p-3">
+                <h3 class="font-semibold text-sm text-gray-200 group-hover:text-indigo-400 transition-colors line-clamp-2" title="{{ a[1] }}">{{ a[1] }}</h3>
+            </div>
+        </a>
+    {% endfor %}
+    </div>
+{% endif %}
+{% endblock %}

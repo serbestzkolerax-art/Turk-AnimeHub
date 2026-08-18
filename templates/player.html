@@ -1,0 +1,63 @@
+
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-darker/80 border-b border-gray-800/80">
+    <div>
+        <span class="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block mb-0.5">Şimdi Oynatılıyor</span>
+        <h2 class="text-xl sm:text-2xl font-black text-gray-100">{{ ep_title }}</h2>
+    </div>
+    {% if next_ep_slug %}
+    <a href="/watch?slug={{ watch_slug }}&ep={{ next_ep_slug }}&title={{ next_ep_title|urlencode }}" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5 shrink-0 text-sm">
+        Sonraki Bölüm
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </a>
+    {% endif %}
+</div>
+
+{% if stream_url %}
+    <div class="w-full aspect-video bg-black relative">
+        {% if stream_kind == "video" %}
+            <video src="{{ stream_url }}" controls autoplay class="w-full h-full object-contain"></video>
+        {% elif stream_kind == "hls" %}
+            <video id="player" controls autoplay class="w-full h-full object-contain"></video>
+            <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+            <script>
+                var video = document.getElementById('player');
+                var src = {{ stream_url|tojson }};
+                if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = src;
+                } else if (Hls.isSupported()) {
+                    var hls = new Hls();
+                    hls.loadSource(src);
+                    hls.attachMedia(video);
+                }
+            </script>
+        {% else %}
+            <iframe src="{{ stream_url }}" class="w-full h-full" allowfullscreen frameborder="0"></iframe>
+        {% endif %}
+    </div>
+{% else %}
+    <div class="w-full aspect-video bg-darker flex flex-col items-center justify-center p-6 text-center border-y border-red-900/30">
+        <div class="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-4 text-3xl">⚠️</div>
+        <h3 class="text-xl font-bold text-red-400 mb-2">Video Oynatılamadı</h3>
+        {% if player_error %}<p class="text-gray-400 text-sm max-w-md">{{ player_error }}</p>{% endif %}
+    </div>
+{% endif %}
+  
+{% if grouped_videos %}
+    <div class="p-4 bg-darker/60 flex flex-col gap-4">
+        {% for fs, players in grouped_videos.items() %}
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <span class="text-xs text-gray-500 font-bold uppercase tracking-wider w-24 shrink-0">{{ fs if fs else 'Varsayılan' }}</span>
+                <div class="flex flex-wrap gap-2">
+                    {% for p_name, v in players.items() %}
+                        <a href="/watch?slug={{ watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}&player={{ p_name|urlencode }}&fansub={{ (v.fansub or '')|urlencode }}" 
+                           class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm
+                           {% if p_name == current_player and fs == current_fansub %}bg-indigo-600 text-white shadow-indigo-500/20 border-indigo-500
+                           {% else %}bg-gray-800/80 text-gray-300 hover:bg-gray-700 hover:text-white border-gray-700{% endif %}">
+                            {{ p_name }}
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}

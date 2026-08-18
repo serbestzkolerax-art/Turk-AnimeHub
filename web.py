@@ -1,24 +1,67 @@
-import sys
-import os
-import traceback
-import functools
-import requests
-import re
+import sys, os, time, traceback, re, functools, requests
+import subprocess, zipfile, io
+from collections import OrderedDict
 from urllib.parse import quote
 
-# Robust import setup: walk upward from this file until we find a folder
-# that actually contains the package, and add THAT to sys.path.
-PACKAGE_NAME = "turkanime_api"
+def _ensure_flaresolverr():
+    try:
+        r = requests.get('http://localhost:8191/', timeout=1)
+        if 'FlareSolverr' in r.text:
+            return
+    except Exception:
+        pass
 
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        fs_dir = os.path.join(base_dir, 'flaresolverr')
+        exe_path = os.path.join(fs_dir, 'flaresolverr.exe')
+
+        if not os.path.exists(exe_path):
+            print("[FlareSolverr] İndiriliyor (bu işlem bir kez yapılır, ~80MB)...")
+            url = 'https://github.com/FlareSolverr/FlareSolverr/releases/download/v3.3.17/flaresolverr_windows_x64.zip'
+            r = requests.get(url)
+            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                z.extractall(base_dir)
+            print("[FlareSolverr] İndirme ve çıkarma tamamlandı.")
+            time.sleep(2)
+        
+        try:
+            output = subprocess.check_output('tasklist /FI "IMAGENAME eq flaresolverr.exe"', shell=True).decode(errors='ignore')
+            if 'flaresolverr.exe' in output:
+                return
+        except Exception:
+            pass
+
+        print("[FlareSolverr] Arka planda başlatılıyor. Lütfen hazır olmasını bekleyin...")
+        subprocess.Popen([exe_path], cwd=fs_dir, creationflags=0x08000000)
+        
+        for _ in range(20):
+            try:
+                r = requests.get('http://localhost:8191/', timeout=1)
+                if 'FlareSolverr' in r.text:
+                    print("[FlareSolverr] Başarıyla başlatıldı ve istekleri kabul etmeye hazır!")
+                    break
+            except Exception:
+                time.sleep(1)
+    except Exception as e:
+        print(f"[FlareSolverr] Otomatik başlatma başarısız: {e}")
+
+if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+    _ensure_flaresolverr()
+else:
+    # Ensure it's ready in worker process too
+    _ensure_flaresolverr()
+
+# ---- Path setup ----
+PACKAGE_NAME = "turkanime_api"
 def _find_and_register_package_root(start_dir):
     d = start_dir
-    for _ in range(5):  # don't walk up forever
+    for _ in range(5):
         if os.path.isdir(os.path.join(d, PACKAGE_NAME)):
             sys.path.insert(0, d)
             return True
         parent = os.path.dirname(d)
-        if parent == d:
-            break
+        if parent == d: break
         d = parent
     return False
 
@@ -27,106 +70,166 @@ if not _find_and_register_package_root(current_dir):
     sys.path.insert(0, os.path.dirname(current_dir))
     sys.path.insert(0, current_dir)
 
-# --- FALLBACK MOCKS FOR ENVIRONMENT COMPATIBILITY ---
-try:
-    import yt_dlp
-except ImportError:
-    from unittest.mock import MagicMock
-    yt_mock = MagicMock()
-    sys.modules['yt_dlp'] = yt_mock
-    sys.modules['yt_dlp.networking'] = MagicMock()
-    sys.modules['yt_dlp.networking.impersonate'] = MagicMock()
+# ---- Mocks ----
+try: import yt_dlp
+except (ImportError, ModuleNotFoundError):
+    from unittest.mock import MagicMock; sys.modules['yt_dlp'] = MagicMock()
+try: import Crypto
+except (ImportError, ModuleNotFoundError):
+    from unittest.mock import MagicMock; sys.modules['Crypto'] = MagicMock()
+try: import curl_cffi
+except (ImportError, ModuleNotFoundError):
+    from unittest.mock import MagicMock; sys.modules['curl_cffi'] = MagicMock()
 
-try:
-    import Crypto
-except ImportError:
-    from unittest.mock import MagicMock
-    crypto_mock = MagicMock()
-    sys.modules['Crypto'] = crypto_mock
-    sys.modules['Crypto.Cipher'] = MagicMock()
-    sys.modules['Crypto.Util'] = MagicMock()
-    sys.modules['Crypto.Util.Padding'] = MagicMock()
-
-try:
-    import curl_cffi
-except ImportError:
-    import requests
-    from unittest.mock import MagicMock
-    
-    class DummySession(requests.Session):
-        def __init__(self, *args, impersonate=None, verify=None, **kwargs):
-            super().__init__(*args, **kwargs)
-            
-    curl_requests = MagicMock()
-    curl_requests.Session = DummySession
-    curl_requests.get = requests.get
-    curl_requests.post = requests.post
-    curl_mock = MagicMock()
-    curl_mock.requests = curl_requests
-    sys.modules['curl_cffi'] = curl_mock
-    sys.modules['curl_cffi.requests'] = curl_requests
-
-try:
-    from turkanime_api import animedepo
-    from turkanime_api import objects as turkanime_objects
-    
-    # Fast timeout wrapper to prevent Gitlab network hangs
-    _orig_animedepo_get = animedepo.requests.get
-    def _fast_animedepo_get(url, *args, **kwargs):
-        kwargs['timeout'] = kwargs.get('timeout', 3)
-        return _orig_animedepo_get(url, *args, **kwargs)
-    animedepo.requests.get = _fast_animedepo_get
-    animedepo.USE_TURKANIME = True
-except ModuleNotFoundError as e:
-    print(f"[FATAL] '{PACKAGE_NAME}' paketi bulunamadı: {e}")
-    print(f"web.py konumu: {current_dir}")
-    print(f"sys.path: {sys.path}")
-    raise
-
-from flask import Flask, render_template_string, request, redirect
+from turkanime_api import animecix, animedepo
+from turkanime_api.sources import chain as live_chain
+from turkanime_api.sources import tranime, anizle, animely, openani
+from flask import Flask, render_template, request, redirect, jsonify
 
 app = Flask(__name__)
 
-# --- MYANIMELIST COVER FETCHING WITH CACHING ---
 DEFAULT_COVER = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80"
 
 @functools.lru_cache(maxsize=500)
 def get_mal_cover(title):
-    """MyAnimeList API üzerinden yüksek çözünürlüklü kapak fotoğrafı çeker."""
-    if not title:
+    if not title or title.lower() == "none":
         return DEFAULT_COVER
-    
-    clean_title = re.sub(r'-(izle|bolum|bölüm|\d+.*)', '', str(title), flags=re.IGNORECASE).strip()
-    clean_title = re.sub(r'[^\w\s]', ' ', clean_title).strip()
-    if not clean_title:
-        clean_title = str(title)
-        
+    clean = re.sub(r'-(izle|bolum|bölüm|\d+.*)', '', str(title), flags=re.IGNORECASE).strip()
+    clean = re.sub(r'[^\w\s]', ' ', clean).strip()
+    if not clean: clean = str(title)
     try:
-        url = f"https://myanimelist.net/search/prefix.json?type=anime&keyword={quote(clean_title)}&v=1"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        resp = requests.get(url, headers=headers, timeout=2.5)
+        url = f"https://myanimelist.net/search/prefix.json?type=anime&keyword={quote(clean)}&v=1"
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2.5)
         if resp.status_code == 200:
             data = resp.json()
-            categories = data.get("categories", [])
-            if categories and categories[0].get("items"):
-                img_url = categories[0]["items"][0].get("image_url", "")
-                if img_url:
-                    full_res_img = re.sub(r'/r/\d+x\d+', '', img_url)
-                    return full_res_img
-    except Exception as e:
-        print(f"[MAL Cover error for '{title}']: {e}")
-        
+            cat = data.get("categories", [])
+            if cat and cat[0].get("items"):
+                img = cat[0]["items"][0].get("image_url", "")
+                if img: return re.sub(r'/r/\d+x\d+', '', img)
+    except Exception: pass
     return DEFAULT_COVER
 
 @app.route("/api/cover")
 def cover_api():
-    """Asenkron kapak resmi yönlendiricisi (Sayfa yüklemesini hızlandırır)."""
     title = request.args.get("title", "").strip()
-    cover_url = get_mal_cover(title)
-    return redirect(cover_url)
+    if not title or title.lower() == "none":
+        return redirect(DEFAULT_COVER)
+    return redirect(get_mal_cover(title))
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
+@app.route("/api/alt_sources")
+def alt_sources_api():
+    title = request.args.get("title", "").strip()
+    ep_title = request.args.get("ep_title", "").strip()
+    current_slug = request.args.get("current_slug", "").strip()
+    
+    if not title or not ep_title:
+        return jsonify([])
+        
+    target_num = None
+    am = re.search(r'(\d+)\s*\.?\s*[Bb]ölüm', ep_title)
+    if not am: am = re.search(r'[Bb]ölüm\s*(\d+)', ep_title)
+    if not am:
+        anums = re.findall(r'(\d+)', ep_title)
+        if anums: target_num = int(anums[-1])
+    else:
+        target_num = int(am.group(1))
+        
+    if target_num is None:
+        return jsonify([])
+
+    alternatives = []
+    
+    import concurrent.futures
+
+    def check_live_provider(l_slug, provider_name):
+        try:
+            details = live_chain.get_anime_details(l_slug)
+            if details and "episodes" in details:
+                for ep_s, ep_t in details["episodes"]:
+                    anums2 = re.findall(r'(\d+)', ep_t)
+                    if anums2 and int(anums2[-1]) == target_num:
+                        url = f"/watch?slug={quote(l_slug)}&ep={quote(ep_s)}&title={quote(ep_t)}"
+                        return {"provider": provider_name, "url": url}
+        except Exception:
+            pass
+        return None
+
+    futures_list = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+
+        # Check AnimeCix
+        def check_animecix():
+            try:
+                cix_results = animecix.Anime.arama_yap(title)
+                for cix_slug, cix_title in cix_results:
+                    if _is_title_match(cix_title, title) and str(cix_slug) != current_slug:
+                        test_anime = animecix.Anime(slug=cix_slug)
+                        eps = test_anime.get_bolum_listesi()
+                        if eps:
+                            for ep_s, ep_t in eps:
+                                anums2 = re.findall(r'(\d+)', ep_t)
+                                if anums2 and int(anums2[-1]) == target_num:
+                                    url = f"/watch?slug={quote(str(cix_slug))}&ep={quote(ep_s)}&title={quote(ep_t)}"
+                                    return {"provider": "AnimeCix", "url": url}
+                        break
+            except Exception:
+                pass
+            return None
+        futures_list.append(executor.submit(check_animecix))
+        
+        # Check Live Providers
+        try:
+            live_results = live_chain.search_all(title, limit=3)
+            # Filter results with matching exact title and different slug
+            valid_slugs = []
+            seen_providers = set()
+            for s, t in live_results:
+                if _is_title_match(t, title) and s != current_slug:
+                    prov = s.split(":")[0].title()
+                    if prov.lower() == "animecix":
+                        continue
+                    if prov not in seen_providers:
+                        seen_providers.add(prov)
+                        valid_slugs.append((s, prov))
+                        
+            for s, p in valid_slugs:
+                futures_list.append(executor.submit(check_live_provider, s, p))
+        except Exception:
+            pass
+
+        for future in concurrent.futures.as_completed(futures_list):
+            res = future.result()
+            if res:
+                alternatives.append(res)
+                
+    # Deduplicate providers (case insensitive)
+    seen = set()
+    deduped = []
+    for alt in alternatives:
+        prov = alt["provider"].lower()
+        if prov not in seen:
+            seen.add(prov)
+            deduped.append(alt)
+                
+    # Sort alphabetically by provider name
+    deduped.sort(key=lambda x: x["provider"])
+    return jsonify(deduped)
+
+# ---- Popular list ----
+POPULAR = [
+    ("ecchi_8", "One Punch Man"),
+    ("ecchi_25", "Attack on Titan"),
+    ("ecchi_17", "Tokyo Ghoul"),
+    ("ecchi_7609", "Kuroko no Basket"),
+    ("ecchi_12136", "My Hero Academia"),
+    ("ecchi_7352", "Jujutsu Kaisen"),
+    ("ecchi_66", "One Piece"),
+    ("ecchi_7258", "Dr. Stone"),
+    ("ecchi_8086", "Kyoukai no Kanata"),
+]
+
+# ---- HTML Template (keep your existing template) ----
+HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="tr" class="dark">
 <head>
     <meta charset="UTF-8">
@@ -141,62 +244,41 @@ HTML_TEMPLATE = """
             darkMode: 'class',
             theme: {
                 extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
                     colors: {
                         darker: '#0a0d14',
                         cardbg: '#121722',
-                        cardhover: '#1a202c',
                         accent: '#e11d48',
-                        accentglow: '#ff2a55',
                     }
                 }
             }
         }
     </script>
     <style>
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0a0d14; }
+        ::-webkit-scrollbar-thumb { background: #232a3b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #e11d48; }
+        .season-tab {
+            transition: all 0.2s;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
         }
-        ::-webkit-scrollbar-track {
-            background: #0a0d14;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #232a3b;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #e11d48;
-        }
-        .card-glow:hover {
-            box-shadow: 0 10px 30px -10px rgba(225, 29, 72, 0.4);
-        }
-        .text-glow {
-            text-shadow: 0 0 12px rgba(225, 29, 72, 0.6);
-        }
+        .season-tab.active { border-bottom-color: #e11d48; color: #e11d48; font-weight: 700; }
+        .season-tab:hover { color: #e11d48; }
     </style>
 </head>
-<body class="bg-darker text-gray-100 font-sans min-h-screen selection:bg-accent selection:text-white flex flex-col">
-    <!-- Top Navbar -->
+<body class="bg-darker text-gray-100 font-sans min-h-screen flex flex-col">
     <nav class="bg-cardbg/95 backdrop-blur-md border-b border-gray-800/80 sticky top-0 z-50 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-2xl">
         <div class="flex items-center gap-8">
             <a href="/" class="text-2xl font-black tracking-wider text-accent flex items-center gap-2 group">
                 <span class="text-3xl transform group-hover:scale-110 transition duration-300">⚡</span>
                 <span class="bg-gradient-to-r from-accent via-rose-400 to-white bg-clip-text text-transparent">ANIME</span><span class="text-white">HUB</span>
             </a>
-            <div class="hidden md:flex items-center gap-6 text-sm font-semibold text-gray-300">
-                <a href="/" class="hover:text-accent transition flex items-center gap-1.5">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-                    Ana Sayfa
-                </a>
-            </div>
         </div>
-
         <form action="/" method="GET" class="flex items-center gap-2 w-full max-w-md ml-4">
             <div class="relative w-full">
-                <input type="text" name="q" value="{{ query }}" placeholder="Anime ara (örn. Naruto, One Piece)..." 
+                <input type="text" name="q" value="{{ query }}" placeholder="Anime ara..."
                     class="w-full bg-darker/90 border border-gray-700/80 text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent text-white placeholder-gray-500 transition shadow-inner">
                 <svg class="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -208,44 +290,25 @@ HTML_TEMPLATE = """
         </form>
     </nav>
 
-    <!-- Main Container -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full">
-
         {% if selected_anime %}
-            <!-- Detail View -->
             <div class="mb-6">
                 <a href="/" class="inline-flex items-center text-sm font-semibold text-gray-400 hover:text-accent transition gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
                     Ana Sayfaya Dön
                 </a>
             </div>
-
             <div class="grid grid-cols-1 md:grid-cols-4 gap-8 bg-cardbg/80 backdrop-blur p-6 sm:p-8 rounded-3xl border border-gray-800/80 shadow-2xl relative overflow-hidden">
                 <div class="absolute -right-20 -top-20 w-80 h-80 bg-accent/10 rounded-full blur-3xl pointer-events-none"></div>
-                
                 <div class="md:col-span-1 flex flex-col items-center">
                     <div class="relative group w-full overflow-hidden rounded-2xl shadow-xl border border-gray-700/50 aspect-[2/3]">
                         <img src="/api/cover?title={{ selected_anime.title|urlencode }}" 
                              alt="{{ selected_anime.title }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
-                        <div class="absolute top-3 left-3 bg-black/70 backdrop-blur px-2.5 py-1 rounded-lg text-xs font-bold text-amber-400 flex items-center gap-1 border border-amber-400/30">
-                            ★ {{ selected_anime.info.get('Puanı', '8.5') }}
-                        </div>
                     </div>
                 </div>
-
                 <div class="md:col-span-3 flex flex-col justify-between">
                     <div>
-                        <div class="flex flex-wrap items-center gap-3 mb-3">
-                            <span class="bg-accent/20 border border-accent/40 text-accent font-bold text-xs px-3 py-1 rounded-full uppercase tracking-wider">
-                                {{ selected_anime.info.get('Tür', 'TV Serisi') }}
-                            </span>
-                            <span class="bg-gray-800 text-gray-300 text-xs px-3 py-1 rounded-full font-medium">
-                                Kaynak: {{ source_name or 'AnimeDepo & Turkanime' }}
-                            </span>
-                        </div>
-
                         <h1 class="text-3xl sm:text-4xl font-extrabold mb-4 text-white tracking-tight leading-tight">{{ selected_anime.title }}</h1>
-                        
                         <div class="bg-darker/60 p-4 rounded-2xl border border-gray-800/60 mb-6">
                             <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Özet / Konu</h3>
                             <p class="text-gray-300 text-sm leading-relaxed max-h-48 overflow-y-auto pr-2">
@@ -253,49 +316,66 @@ HTML_TEMPLATE = """
                             </p>
                         </div>
                     </div>
-
                     <div class="flex items-center gap-4 text-xs text-gray-400">
                         <span>Stüdyo: <strong class="text-gray-200">{{ selected_anime.info.get('Stüdyo', 'Bilinmiyor') }}</strong></span>
                         <span>•</span>
-                        <span>Bölüm Sayısı: <strong class="text-accent">{{ episodes|length }} Bölüm</strong></span>
+                        <span>Bölüm Sayısı: <strong class="text-accent">{{ total_episodes }} Bölüm</strong></span>
                     </div>
                 </div>
             </div>
 
-            <!-- Episodes Grid Section -->
             <div class="mt-10">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
-                        <span class="w-2 h-7 bg-accent rounded-full inline-block"></span>
-                        Bölümler Listesi
-                    </h2>
-                    <span class="text-xs text-gray-400 bg-cardbg px-3 py-1.5 rounded-lg border border-gray-800">
-                        Toplam {{ episodes|length }} Bölüm
-                    </span>
+                {% if seasons %}
+                <div class="flex flex-wrap gap-2 mb-6 border-b border-gray-800 pb-2">
+                    {% for season_num in seasons.keys()|sort %}
+                        <button onclick="switchSeason({{ season_num }})" 
+                                class="season-tab px-4 py-2 text-sm font-semibold text-gray-400 focus:outline-none"
+                                id="tab-{{ season_num }}">{{ season_num }}. Sezon</button>
+                    {% endfor %}
                 </div>
 
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 p-1">
-                    {% if episodes %}
-                        {% for ep in episodes %}
-                            {% set ep_slug_val = ep.get('slug') if ep is mapping else ep[0] %}
-                            {% set ep_title_val = ep.get('title') if ep is mapping else ep[1] %}
-                            <a href="/watch?slug={{ selected_anime.slug }}&ep={{ ep_slug_val }}&title={{ ep_title_val|urlencode }}" 
+                {% for season_num, eps in seasons.items()|sort %}
+                    <div id="season-{{ season_num }}" class="season-content hidden">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 p-1">
+                            {% for ep_slug, ep_title in eps %}
+                                <a href="/watch?slug={{ selected_anime.slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}" 
+                                   class="group bg-cardbg hover:bg-gradient-to-r hover:from-accent hover:to-rose-600 border border-gray-800/80 hover:border-accent p-3.5 rounded-xl text-center text-sm font-semibold transition-all duration-200 truncate block shadow-md hover:shadow-rose-600/30 hover:scale-[1.02]">
+                                    <span class="text-gray-300 group-hover:text-white truncate block">{{ ep_title }}</span>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+                {% else %}
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 p-1">
+                        {% for ep_slug, ep_title in episodes %}
+                            <a href="/watch?slug={{ selected_anime.slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}" 
                                class="group bg-cardbg hover:bg-gradient-to-r hover:from-accent hover:to-rose-600 border border-gray-800/80 hover:border-accent p-3.5 rounded-xl text-center text-sm font-semibold transition-all duration-200 truncate block shadow-md hover:shadow-rose-600/30 hover:scale-[1.02]">
-                                <span class="text-gray-300 group-hover:text-white truncate block">
-                                    {{ ep_title_val }}
-                                </span>
+                                <span class="text-gray-300 group-hover:text-white truncate block">{{ ep_title }}</span>
                             </a>
                         {% endfor %}
-                    {% else %}
-                        <div class="col-span-full bg-cardbg p-8 rounded-2xl text-center border border-gray-800">
-                            <p class="text-gray-400 mb-2">⚠️ Bu seriye ait bölüm bilgisi sunucudan çekilemedi.</p>
-                        </div>
-                    {% endif %}
-                </div>
+                    </div>
+                {% endif %}
             </div>
 
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    const tabs = document.querySelectorAll('.season-tab');
+                    if (tabs.length > 0) {
+                        tabs[0].classList.add('active');
+                        const firstSeasonNum = tabs[0].id.split('-')[1];
+                        document.getElementById('season-' + firstSeasonNum).classList.remove('hidden');
+                    }
+                });
+                function switchSeason(seasonNum) {
+                    document.querySelectorAll('.season-tab').forEach(tab => tab.classList.remove('active'));
+                    document.querySelectorAll('.season-content').forEach(div => div.classList.add('hidden'));
+                    document.getElementById('tab-' + seasonNum).classList.add('active');
+                    document.getElementById('season-' + seasonNum).classList.remove('hidden');
+                }
+            </script>
+
         {% elif watch_slug %}
-            <!-- Watch View -->
             <div class="mb-6 flex items-center justify-between">
                 <a href="/?slug={{ watch_slug }}" class="inline-flex items-center text-sm font-semibold text-gray-400 hover:text-accent transition gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
@@ -309,18 +389,18 @@ HTML_TEMPLATE = """
                         <span class="text-xs font-bold text-accent uppercase tracking-widest block mb-1">Oynatılıyor</span>
                         <h2 class="text-2xl sm:text-3xl font-extrabold text-white">{{ ep_title }}</h2>
                     </div>
-                    {% if player_name %}
-                        <span class="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-3.5 py-1.5 rounded-full font-semibold self-start sm:self-auto">
-                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                            Aktif Kaynak: {{ player_name }}
-                        </span>
+                    {% if next_ep_slug %}
+                    <a href="/watch?slug={{ watch_slug }}&ep={{ next_ep_slug }}&title={{ next_ep_title|urlencode }}" class="bg-accent hover:bg-rose-600 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg transition-all flex items-center gap-2 hover:scale-105">
+                        Sonraki Bölüm
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </a>
                     {% endif %}
                 </div>
 
                 {% if stream_url %}
                     <div class="bg-black rounded-2xl overflow-hidden mb-6 aspect-video shadow-2xl border border-gray-800 relative">
                         {% if stream_kind == "video" %}
-                            <video id="player" src="{{ stream_url }}" controls autoplay class="w-full h-full"></video>
+                            <video src="{{ stream_url }}" controls autoplay class="w-full h-full"></video>
                         {% elif stream_kind == "hls" %}
                             <video id="player" controls autoplay class="w-full h-full"></video>
                             <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -343,221 +423,200 @@ HTML_TEMPLATE = """
                     <div class="bg-darker/90 rounded-2xl p-10 text-center border border-red-900/50 mb-6">
                         <div class="w-12 h-12 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">⚠️</div>
                         <h3 class="text-lg font-bold text-red-400 mb-2">Video Oynatılamadı</h3>
-                        <p class="text-xs text-gray-400 mb-4">Seçilen video oynatıcı yanıt vermedi. Lütfen aşağıdaki alternatif kaynakları deneyin.</p>
-                        {% if player_error %}<pre class="text-left text-xs bg-black/60 p-4 rounded-xl text-red-300 overflow-x-auto whitespace-pre-wrap font-mono">{{ player_error }}</pre>{% endif %}
+                        {% if player_error %}<p class="text-gray-400 text-sm">{{ player_error }}</p>{% endif %}
                     </div>
                 {% endif %}
-
-                {% if other_players %}
-                    <div class="border-t border-gray-800/80 pt-6">
-                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Alternatif Oynatıcı Kaynakları:</h3>
-                        <div class="flex flex-wrap gap-2.5">
-                            {% for p in other_players %}
-                                <a href="/watch?slug={{ watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}&player={{ p }}"
-                                   class="text-xs font-bold px-4 py-2 rounded-xl border transition-all duration-200 flex items-center gap-1.5 {{ 'bg-accent border-accent text-white shadow-lg shadow-rose-600/30' if p == player_name else 'bg-darker hover:bg-gray-800 border-gray-700 text-gray-300' }}">
-                                    <span>▶</span> {{ p }}
-                                </a>
-                            {% endfor %}
-                        </div>
-                    </div>
-                {% endif %}
+                  
+                {% if grouped_videos %}
+                  <div class="mt-4 flex flex-col gap-3 bg-darker/50 p-4 rounded-xl border border-gray-800/50">
+                      <span class="text-sm text-gray-400 font-bold mb-1">📺 Video Seçimi:</span>
+                      <div class="flex flex-col gap-4">
+                          {% for fs, players in grouped_videos.items() %}
+                              <div class="flex flex-col gap-1.5">
+                                  <span class="text-xs text-gray-500 font-semibold uppercase tracking-wider">{{ fs }}</span>
+                                  <div class="flex flex-wrap gap-2">
+                                      {% for p_name, v in players.items() %}
+                                          <a href="/watch?slug={{ watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}&player={{ p_name|urlencode }}&fansub={{ (v.fansub or '')|urlencode }}" 
+                                             class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm
+                                             {% if p_name == current_player and fs == current_fansub %}bg-accent text-white shadow-accent/20 border-accent
+                                             {% else %}bg-gray-800/80 text-gray-300 hover:bg-gray-700 hover:text-white border-gray-700{% endif %}">
+                                              {{ p_name }}
+                                          </a>
+                                      {% endfor %}
+                                  </div>
+                              </div>
+                          {% endfor %}
+                      </div>
+                  </div>
+                  {% endif %}
+                  
+                  <!-- Additional Resources / Alternate Providers -->
+                  <div id="alt-sources-wrapper" class="mt-4 flex flex-col gap-3 hidden bg-darker/50 p-4 rounded-xl border border-gray-800/50">
+                      <span class="text-sm text-gray-400 font-bold">🌍 Alternatif Kaynaklar:</span>
+                      <div id="alt-sources-container" class="flex flex-wrap gap-2">
+                      </div>
+                  </div>
+                
             </div>
 
-            <!-- Client-side History Saver -->
+            <!-- Alternate sources script -->
             <script>
-                (function() {
-                    try {
-                        const historyItem = {
-                            slug: {{ watch_slug|tojson }},
-                            ep_slug: {{ ep_slug|tojson }},
-                            ep_title: {{ ep_title|tojson }},
-                            anime_title: {{ (anime_title or watch_slug)|tojson }},
-                            cover: "/api/cover?title=" + encodeURIComponent({{ (anime_title or watch_slug)|tojson }}),
-                            timestamp: new Date().getTime()
-                        };
-                        let history = JSON.parse(localStorage.getItem('animehub_history') || '[]');
-                        history = history.filter(item => !(item.slug === historyItem.slug && item.ep_slug === historyItem.ep_slug));
-                        history.unshift(historyItem);
-                        history = history.slice(0, 15);
-                        localStorage.setItem('animehub_history', JSON.stringify(history));
-                    } catch(e) {
-                        console.error('History save error:', e);
-                    }
-                })();
+                document.addEventListener('DOMContentLoaded', function() {
+                    const title = {{ anime_title|tojson }};
+                    const epTitle = {{ ep_title|tojson }};
+                    const currentSlug = {{ watch_slug|tojson }};
+                    
+                    fetch('/api/alt_sources?title=' + encodeURIComponent(title) + '&ep_title=' + encodeURIComponent(epTitle) + '&current_slug=' + encodeURIComponent(currentSlug))
+                        .then(res => res.json())
+                        .then(data => {
+                              const wrapper = document.getElementById('alt-sources-wrapper');
+                              const container = document.getElementById('alt-sources-container');
+                              
+                              if(data && data.length > 0) {
+                                  wrapper.classList.remove('hidden');
+                                  container.innerHTML = '';
+                                  data.forEach(src => {
+                                      const a = document.createElement('a');
+                                      a.href = src.url;
+                                      a.className = "px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border bg-gray-800/80 text-gray-300 hover:bg-gray-700 hover:text-white border-gray-700 shadow-sm";
+                                      a.textContent = `[${src.provider}] Diğer Kaynak`;
+                                      container.appendChild(a);
+                                  });
+                              }
+                        })
+                        .catch(err => console.error("Alt sources fetch error:", err));
+                });
             </script>
 
-        {% elif query %}
-            <!-- Search Results View -->
-            <div class="mb-6 flex items-center justify-between">
-                <h2 class="text-2xl font-bold text-white">
-                    Arama Sonuçları: <span class="text-accent font-extrabold">"{{ query }}"</span>
-                </h2>
-                <a href="/" class="text-xs font-semibold text-gray-400 hover:text-white">Filtreyi Temizle</a>
-            </div>
+            <!-- History Saver -->
+            <script>
+                (function() {
+                    const item = {
+                        slug: {{ watch_slug|tojson }},
+                        ep_slug: {{ ep_slug|tojson }},
+                        ep_title: {{ ep_title|tojson }},
+                        anime_title: {{ anime_title|tojson }},
+                        cover: "/api/cover?title=" + encodeURIComponent({{ anime_title|tojson }}),
+                        timestamp: Date.now()
+                    };
+                    let history = JSON.parse(localStorage.getItem('animehub_history') || '[]');
+                    history = history.filter(h => h.slug !== item.slug);
+                    history.unshift(item);
+                    history = history.slice(0, 15);
+                    localStorage.setItem('animehub_history', JSON.stringify(history));
+                })();
+            </script>
+            
+            <!-- Episode Grid -->
+            {% if seasons %}
+                <div class="mt-8 bg-cardbg p-6 sm:p-8 rounded-3xl border border-gray-800 shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-800 pb-4">Tüm Bölümler</h3>
+                    
+                    {% if seasons|length > 1 %}
+                        <div class="flex flex-wrap gap-2 mb-6 border-b border-gray-800/60 pb-4">
+                            {% for season_num, _ in seasons.items()|sort %}
+                                <button id="tab-{{ season_num }}" class="season-tab px-4 py-2 text-sm font-semibold text-gray-400 rounded-lg hover:bg-gray-800/50 {% if loop.first %}active{% endif %}" onclick="switchSeason('{{ season_num }}')">{{ season_num }}</button>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
 
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                {% if results %}
-                    {% for item in results %}
-                        {% set item_slug = item.get('slug') if item is mapping else item[0] %}
-                        {% set item_title = item.get('title') if item is mapping else item[1] %}
-                        <a href="/?slug={{ item_slug }}" class="group bg-cardbg rounded-2xl overflow-hidden border border-gray-800 hover:border-accent transition-all duration-300 flex flex-col shadow-xl card-glow">
-                            <div class="relative aspect-[2/3] overflow-hidden bg-darker">
-                                <img src="/api/cover?title={{ item_title|urlencode }}" alt="{{ item_title }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
-                                <div class="absolute inset-0 bg-gradient-to-t from-darker via-transparent to-transparent opacity-80"></div>
-                                <span class="absolute top-2 right-2 bg-black/70 backdrop-blur text-amber-400 text-[11px] font-bold px-2 py-0.5 rounded border border-amber-400/20">
-                                    ★ MAL
-                                </span>
+                    {% for season_num, eps in seasons.items()|sort %}
+                        <div id="season-{{ season_num }}" class="season-content {% if not loop.first %}hidden{% endif %}">
+                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 p-1">
+                                {% for ep_s, ep_t in eps %}
+                                    <a href="/watch?slug={{ watch_slug }}&ep={{ ep_s }}&title={{ ep_t|urlencode }}" 
+                                       class="group bg-darker hover:bg-gradient-to-r hover:from-accent hover:to-rose-600 border border-gray-800/80 hover:border-accent p-3.5 rounded-xl text-center text-sm font-semibold transition-all duration-200 truncate block shadow-md hover:shadow-rose-600/30 hover:scale-[1.02] {% if ep_s == ep_slug %}ring-2 ring-accent bg-accent/10{% endif %}">
+                                        <span class="text-gray-300 group-hover:text-white truncate block">{{ ep_t }}</span>
+                                    </a>
+                                {% endfor %}
                             </div>
-                            <div class="p-4 flex-1 flex flex-col justify-between">
-                                <h3 class="text-sm font-bold group-hover:text-accent transition line-clamp-2 text-white leading-snug mb-2">
-                                    {{ item_title }}
-                                </h3>
-                                <span class="text-[11px] text-gray-400 font-semibold group-hover:text-rose-400 transition">
-                                    İzlemek için tıkla →
-                                </span>
-                            </div>
-                        </a>
+                        </div>
                     {% endfor %}
-                {% else %}
-                    <div class="col-span-full bg-cardbg p-12 rounded-3xl text-center border border-gray-800">
-                        <div class="text-4xl mb-3">🔍</div>
-                        <h3 class="text-lg font-bold text-white mb-1">Aramanızla eşleşen anime bulunamadı</h3>
-                        <p class="text-sm text-gray-400">Lütfen farklı kelimelerle (örn. "Naruto", "One Piece") tekrar arama yapın.</p>
+                </div>
+            {% elif episodes %}
+                <div class="mt-8 bg-cardbg p-6 sm:p-8 rounded-3xl border border-gray-800 shadow-2xl">
+                    <h3 class="text-xl font-bold text-white mb-6 border-b border-gray-800 pb-4">Tüm Bölümler</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 p-1">
+                        {% for ep_s, ep_t in episodes %}
+                            <a href="/watch?slug={{ watch_slug }}&ep={{ ep_s }}&title={{ ep_t|urlencode }}" 
+                               class="group bg-darker hover:bg-gradient-to-r hover:from-accent hover:to-rose-600 border border-gray-800/80 hover:border-accent p-3.5 rounded-xl text-center text-sm font-semibold transition-all duration-200 truncate block shadow-md hover:shadow-rose-600/30 hover:scale-[1.02] {% if ep_s == ep_slug %}ring-2 ring-accent bg-accent/10{% endif %}">
+                                <span class="text-gray-300 group-hover:text-white truncate block">{{ ep_t }}</span>
+                            </a>
+                        {% endfor %}
                     </div>
-                {% endif %}
+                </div>
+            {% endif %}
+
+        {% elif query %}
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-white">Arama Sonuçları: <span class="text-accent">"{{ query }}"</span></h2>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {% for item in results %}
+                    <a href="/?slug={{ item[0] }}" class="group bg-cardbg rounded-2xl overflow-hidden border border-gray-800 hover:border-accent transition flex flex-col shadow-xl card-glow">
+                        <div class="relative aspect-[2/3] overflow-hidden bg-darker">
+                            <img src="/api/cover?title={{ item[1]|urlencode }}" alt="{{ item[1] }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
+                        </div>
+                        <div class="p-3 flex-1">
+                            <h3 class="text-xs font-bold group-hover:text-accent transition line-clamp-2 text-white">{{ item[1] }}</h3>
+                        </div>
+                    </a>
+                {% endfor %}
             </div>
 
         {% else %}
-            <!-- MAIN HOME PAGE (AnimeCix.tv Style) -->
-            
-            <!-- Hero Featured Banner Section -->
-            {% if featured_anime %}
-            <div class="relative rounded-3xl overflow-hidden mb-12 shadow-2xl border border-gray-800 bg-gradient-to-r from-darker via-cardbg to-darker">
-                <div class="grid grid-cols-1 lg:grid-cols-12 items-center min-h-[380px] p-6 sm:p-10 relative z-10">
-                    <div class="lg:col-span-7 flex flex-col justify-center">
-                        <div class="flex items-center gap-3 mb-3">
-                            <span class="bg-accent text-white font-black text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-md shadow-md">
-                                Öne Çıkan Anime
-                            </span>
-                            <span class="text-amber-400 text-xs font-bold flex items-center gap-1">
-                                ★ {{ featured_anime.get('score', '9.1') }} MyAnimeList
-                            </span>
-                        </div>
-                        <h1 class="text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight mb-4 text-glow">
-                            {{ featured_anime.title }}
-                        </h1>
-                        <p class="text-gray-300 text-sm leading-relaxed line-clamp-3 mb-6 max-w-xl">
-                            {{ featured_anime.get('summary', 'Efsanevi anime serisini Full HD kalitede ve kesintisiz hemen izlemeye başla!') }}
-                        </p>
-                        <div class="flex items-center gap-4">
-                            <a href="/?slug={{ featured_anime.slug }}" class="bg-gradient-to-r from-accent to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-extrabold px-8 py-3.5 rounded-2xl text-sm shadow-xl shadow-rose-600/30 hover:scale-105 transition duration-200 flex items-center gap-2">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
-                                Hemen İzle
-                            </a>
-                            <a href="/?slug={{ featured_anime.slug }}" class="bg-gray-800/80 hover:bg-gray-700 text-gray-200 font-bold px-6 py-3.5 rounded-2xl text-sm border border-gray-700 transition">
-                                Detaylar
-                            </a>
-                        </div>
-                    </div>
-                    <div class="lg:col-span-5 hidden lg:flex justify-center items-center p-4">
-                        <div class="relative w-64 h-96 rounded-2xl overflow-hidden shadow-2xl border-2 border-accent/40 rotate-2 hover:rotate-0 transition duration-500">
-                            <img src="/api/cover?title={{ featured_anime.title|urlencode }}" alt="{{ featured_anime.title }}" class="w-full h-full object-cover">
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Recently Watched (Son İzlenenler) Section -->
+            <!-- Homepage -->
             <section id="recent-watched-section" class="mb-12 hidden">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-black text-white flex items-center gap-3">
-                        <span class="w-2.5 h-7 bg-rose-500 rounded-full inline-block"></span>
-                        Son İzlenenler
-                    </h2>
-                    <button onclick="clearAllHistory()" class="text-xs text-gray-400 hover:text-accent transition font-semibold">
-                        Geçmişi Temizle
-                    </button>
+                <div class="flex justify-between mb-6">
+                    <h2 class="text-2xl font-black text-white">Son İzlenenler</h2>
+                    <button onclick="clearAllHistory()" class="text-xs text-gray-400 hover:text-accent">Geçmişi Temizle</button>
                 </div>
-                <div id="recent-watched-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5">
-                    <!-- Dynamic JS Injection -->
-                </div>
+                <div id="recent-watched-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5"></div>
             </section>
 
-            <!-- Popular Animes Section -->
             <section class="mb-12">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-black text-white flex items-center gap-3">
-                        <span class="w-2.5 h-7 bg-accent rounded-full inline-block"></span>
-                        Popüler Animeler (AnimeDepo Katalog)
-                    </h2>
-                    <span class="text-xs text-gray-400 font-medium">MyAnimeList Görselleri</span>
-                </div>
-
+                <h2 class="text-2xl font-black text-white mb-6">Popüler Animeler</h2>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
                     {% for item in popular_catalog %}
-                        {% set item_slug = item[0] %}
-                        {% set item_title = item[1] %}
-                        <a href="/?slug={{ item_slug }}" class="group bg-cardbg rounded-2xl overflow-hidden border border-gray-800/80 hover:border-accent transition-all duration-300 flex flex-col shadow-xl card-glow">
+                        <a href="/?slug={{ item[0] }}" class="group bg-cardbg rounded-2xl overflow-hidden border border-gray-800/80 hover:border-accent transition flex flex-col shadow-xl card-glow">
                             <div class="relative aspect-[2/3] overflow-hidden bg-darker">
-                                <img src="/api/cover?title={{ item_title|urlencode }}" alt="{{ item_title }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
-                                <div class="absolute inset-0 bg-gradient-to-t from-darker via-transparent to-transparent opacity-80"></div>
-                                <div class="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-0.5 rounded text-[10px] font-bold text-amber-400 border border-amber-400/20">
-                                    ★ MAL
-                                </div>
+                                <img src="/api/cover?title={{ item[1]|urlencode }}" alt="{{ item[1] }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
                             </div>
                             <div class="p-3.5 flex-1 flex flex-col justify-between">
-                                <h3 class="text-xs font-bold group-hover:text-accent transition line-clamp-2 text-white leading-snug mb-1">
-                                    {{ item_title }}
-                                </h3>
-                                <div class="flex items-center justify-between text-[10px] text-gray-400 mt-2 pt-2 border-t border-gray-800/60">
-                                    <span class="text-accent font-bold">HD Türkçe</span>
-                                    <span>İzlese →</span>
-                                </div>
+                                <h3 class="text-xs font-bold group-hover:text-accent transition line-clamp-2 text-white">{{ item[1] }}</h3>
                             </div>
                         </a>
                     {% endfor %}
                 </div>
             </section>
-
         {% endif %}
     </main>
 
-    <!-- Footer -->
     <footer class="bg-cardbg border-t border-gray-800/80 py-8 px-6 text-center text-xs text-gray-500 mt-auto">
         <p class="font-semibold text-gray-400 mb-1">⚡ ANIMEHUB Localhost Streaming</p>
-        <p>AnimeDepo JSON Index & Turkanime & MyAnimeList API Integration</p>
+        <p>Animecix & Ecchicix & Live Providers</p>
+        <p class="mt-2">
+            <a href="/update-catalog" class="text-gray-500 hover:text-accent transition" title="Kataloğu güncelle">🔄 Kataloğu Güncelle</a>
+        </p>
     </footer>
 
-    <!-- Client-side History Renderer Script -->
     <script>
         function renderRecentlyWatched() {
             const container = document.getElementById('recent-watched-container');
             const section = document.getElementById('recent-watched-section');
             if (!container || !section) return;
-
             try {
-                const history = JSON.parse(localStorage.getItem('animehub_history') || '[]');
-                if (history.length === 0) {
-                    section.classList.add('hidden');
-                    return;
-                }
-
+                let history = JSON.parse(localStorage.getItem('animehub_history') || '[]');
+                if (history.length === 0) { section.classList.add('hidden'); return; }
                 section.classList.remove('hidden');
                 container.innerHTML = history.map(item => `
                     <div class="relative group bg-cardbg rounded-2xl overflow-hidden border border-gray-800 hover:border-accent transition-all duration-300 shadow-xl flex flex-col">
                         <div class="relative aspect-[2/3] overflow-hidden bg-darker">
                             <img src="${item.cover}" alt="${item.anime_title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
-                            <div class="absolute inset-0 bg-gradient-to-t from-darker via-black/30 to-transparent"></div>
-                            <button onclick="removeFromHistory('${item.slug}', '${item.ep_slug}', event)" title="Geçmişten Kaldır" 
-                                class="absolute top-2 right-2 bg-black/80 hover:bg-accent text-white w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center transition shadow-md z-10">
-                                ✕
-                            </button>
+                            <button onclick="removeFromHistory('${item.slug}', event)" title="Kaldır" 
+                                class="absolute top-2 right-2 bg-black/80 hover:bg-accent text-white w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center transition shadow-md z-10">✕</button>
                             <div class="absolute bottom-2 left-2 right-2">
-                                <span class="inline-block bg-accent/90 text-white text-[10px] font-black px-2 py-0.5 rounded shadow mb-1">
-                                    ${item.ep_title}
-                                </span>
+                                <span class="inline-block bg-accent/90 text-white text-[10px] font-black px-2 py-0.5 rounded shadow mb-1">${item.ep_title}</span>
                                 <h3 class="text-xs font-bold text-white truncate">${item.anime_title}</h3>
                             </div>
                         </div>
@@ -567,249 +626,702 @@ HTML_TEMPLATE = """
                         </a>
                     </div>
                 `).join('');
-            } catch(e) {
-                console.error('History render error:', e);
-            }
+            } catch(e) { console.error('History render error:', e); }
         }
-
-        function removeFromHistory(slug, ep_slug, event) {
+        function removeFromHistory(slug, event) {
             if (event) event.stopPropagation();
             let history = JSON.parse(localStorage.getItem('animehub_history') || '[]');
-            history = history.filter(item => !(item.slug === slug && item.ep_slug === ep_slug));
+            history = history.filter(item => item.slug !== slug);
             localStorage.setItem('animehub_history', JSON.stringify(history));
             renderRecentlyWatched();
         }
-
         function clearAllHistory() {
             localStorage.removeItem('animehub_history');
             renderRecentlyWatched();
         }
-
         document.addEventListener('DOMContentLoaded', renderRecentlyWatched);
+        function switchSeason(s) {
+            document.querySelectorAll('.season-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.season-tab').forEach(el => el.classList.remove('active'));
+            document.getElementById('season-' + s).classList.remove('hidden');
+            document.getElementById('tab-' + s).classList.add('active');
+        }
     </script>
 </body>
 </html>
 """
 
+# ---------- Caching ----------
+_anime_cache = OrderedDict()
+CACHE_MAX = 50
+CACHE_TTL = 600
+
+def _extract_seasons(episodes):
+    seasons = {}
+    for slug, title in episodes:
+        cix_match = re.match(r'^(\d+)-[\d\.]+$', str(slug))
+        match = re.search(r'(\d+)[-]sezon|sezon[-](\d+)|[Ss](\d+)[Ee]', str(slug))
+        if cix_match:
+            season = int(cix_match.group(1))
+        elif match:
+            season = int(match.group(1) or match.group(2) or match.group(3))
+        else:
+            sm = re.search(r'(\d+)\.?\s*[Ss]ezon', str(title))
+            season = int(sm.group(1)) if sm else 1
+        seasons.setdefault(season, []).append((slug, title))
+    return seasons
+
+def _normalize_slug_from_title(title):
+    slug = title.lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    return slug.strip('-')
+
+def _is_title_match(t1, t2):
+    def normalize(t):
+        t_str = str(t).lower()
+        t_str = re.sub(r'\b(ova|ona|tv|movie|special|specials)\b', '', t_str)
+        return re.sub(r'[^a-z0-9]', '', t_str)
+    
+    n1 = normalize(t1)
+    n2 = normalize(t2)
+    
+    if n1 == n2:
+        return True
+        
+    aliases = {
+        normalize("2.5-jigen no Ririsa"): [normalize("2.5 Dimensional Seduction"), normalize("Nitengo-jigen no Ririsa"), normalize("2.5 Jigen no Ririsa")],
+        normalize("2.5 Dimensional Seduction"): [normalize("2.5-jigen no Ririsa")],
+    }
+    
+    if n1 in aliases and n2 in aliases[n1]:
+        return True
+    if n2 in aliases and n1 in aliases[n2]:
+        return True
+        
+    return False
+def _merge_all_episodes_for_title(title):
+    if not title:
+        return []
+    all_eps = {}
+
+    def parse_sn_en(slug, ep_title):
+        m = re.match(r'^(\d+)-([\d\.]+)$', str(slug))
+        if m:
+            return int(m.group(1)), float(m.group(2))
+        sm = re.search(r'(\d+)\.?\s*[Ss]ezon', str(ep_title))
+        season = int(sm.group(1)) if sm else 1
+        em = re.search(r'(\d+)\s*\.?\s*[Bb]ölüm', str(ep_title))
+        if not em:
+            em = re.search(r'[Bb]ölüm\s*(\d+)', str(ep_title))
+        if not em:
+            nums = re.findall(r'(\d+)', str(ep_title))
+            ep = float(nums[-1]) if nums else 0.0
+        else:
+            ep = float(em.group(1))
+        return season, ep
+
+    import concurrent.futures
+
+    def fetch_local():
+        try:
+            results = animecix.Anime.arama_yap(title)
+            for slug, res_title in results:
+                if _is_title_match(res_title, title):
+                    anime = animecix.Anime(slug=slug)
+                    return anime.get_bolum_listesi() or []
+        except Exception:
+            pass
+        return []
+
+    def fetch_depo():
+        try:
+            from turkanime_api.sources import animedepo as animedepo_source
+            slug = _normalize_slug_from_title(title)
+            return [(f"animedepo:{ep_slug}", ep_title) for ep_slug, ep_title in (animedepo_source.get_anime_episodes(slug) or [])]
+        except Exception:
+            return []
+
+    def fetch_live(prefix):
+        try:
+            if prefix == "tranime":
+                results = tranime.search_tranime(title)[:3]
+            elif prefix == "openani":
+                results = openani.search_openani(title, limit=3)
+            else:
+                return []
+            
+            for slug, res_title in results:
+                if _is_title_match(res_title, title):
+                    details = live_chain.get_anime_details(f"{prefix}:{slug}")
+                    if details and "episodes" in details:
+                        return details["episodes"]
+        except Exception:
+            pass
+        return []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(fetch_local), executor.submit(fetch_depo)]
+        for prefix in ["tranime", "openani"]:
+            futures.append(executor.submit(fetch_live, prefix))
+        
+        for future in concurrent.futures.as_completed(futures):
+            eps = future.result()
+            for ep_slug, ep_title in eps:
+                sn, en = parse_sn_en(ep_slug.split("/")[-1] if "animedepo" in ep_slug else ep_slug, ep_title)
+                if (sn, en) not in all_eps:
+                    all_eps[(sn, en)] = (ep_slug, ep_title)
+                else:
+                    if "animedepo" in ep_slug:
+                        all_eps[(sn, en)] = (ep_slug, ep_title)
+
+    sorted_keys = sorted(all_eps.keys(), key=lambda x: (x[0], x[1]))
+    return [all_eps[k] for k in sorted_keys]
+
 def get_anime_detail(slug):
-    """AnimeDepo (öncelikli), Turkanime (ikincil) veya CLI title match ile detay çek."""
-    # 1. Aşama: AnimeDepo slug doğrudan dene
-    try:
-        anime = animedepo.Anime(slug=slug)
-        episodes = anime.get_bolum_listesi() or []
-        if episodes or anime.info.get("Özet"):
-            return anime, episodes, "AnimeDepo", None
-    except Exception:
-        print("[AnimeDepo detail error]\n" + traceback.format_exc())
+    now = time.time()
+    if slug in _anime_cache:
+        entry = _anime_cache[slug]
+        if now - entry['time'] < CACHE_TTL:
+            _anime_cache.move_to_end(slug)
+            return entry['anime'], entry['episodes'], entry['seasons'], entry['source']
+        else:
+            del _anime_cache[slug]
 
-    # 2. Aşama: Turkanime scrape dene
-    try:
-        anime = turkanime_objects.Anime(slug=slug)
-        episodes = anime.get_bolum_listesi() or []
-        if episodes:
-            return anime, episodes, "Turkanime.co", None
-    except Exception:
-        print("[Turkanime detail error]\n" + traceback.format_exc())
+    anime = None
+    title = None
+    source = "unknown"
+    live_episodes = None
 
-    # 3. Aşama (CLI Tarzı Fallback): Turkanime patlarsa veya 0 bölüm dönerse, Animedepo dizininde başlığa göre arayıp eşleşen slug'ı bul!
-    try:
-        clean_query = slug.replace("-izle", "").replace("-", " ")
-        matches = animedepo.Anime.arama_yap(clean_query)
-        if matches:
-            matched_slug = matches[0][0]
-            anime = animedepo.Anime(slug=matched_slug)
-            episodes = anime.get_bolum_listesi() or []
-            if episodes:
-                return anime, episodes, "AnimeDepo (Akıllı Eşleşme)", None
-    except Exception:
-        print("[Animedepo search fallback detail error]\n" + traceback.format_exc())
+    # 1. Live provider (prefixed slug)
+    if ":" in slug and not slug.startswith("ecchi_"):
+        try:
+            details = live_chain.get_anime_details(slug)
+            if details:
+                title = details["title"]
+                source = slug.split(":")[0]
+                class LiveAnime:
+                    def __init__(self, slug, title, poster, summary):
+                        self.slug = slug
+                        self.title = title
+                        self.info = {"Özet": summary, "Resim": poster}
+                anime = LiveAnime(slug, title, details.get("poster", ""), details.get("summary", ""))
+                live_episodes = details.get("episodes", [])
+        except Exception as e:
+            print(f"[get_anime_detail] live error: {e}")
 
-    return None, [], None, "Anime detay ve bölüm bilgileri sunucudan çekilemedi."
 
+
+    # 3. Local (animecix/ecchicix)
+    if anime is None:
+        try:
+            test_anime = animecix.Anime(slug=slug)
+            if test_anime.title:
+                anime = test_anime
+                title = anime.title
+                source = "animecix"
+        except Exception:
+            pass
+
+    if anime is not None:
+        if not hasattr(anime, "slug"):
+            anime.slug = slug
+
+    if anime is None:
+        title = slug.replace("-", " ").title()
+        class DummyAnime:
+            def __init__(self, slug, title):
+                self.slug = slug
+                self.title = title
+                self.info = {"Özet": "Bu anime için detay bulunamadı.", "Resim": ""}
+        anime = DummyAnime(slug, title)
+        return anime, [], {}, "dummy"
+
+    if not title:
+        title = slug.replace("-", " ").title()
+
+    merged_eps = _merge_all_episodes_for_title(title)
+    
+    # If live provider returned episodes not captured by merge, add them
+    if live_episodes:
+        existing_slugs = {e[0] for e in merged_eps}
+        for ep_s, ep_t in live_episodes:
+            if ep_s not in existing_slugs:
+                merged_eps.append((ep_s, ep_t))
+
+    seasons = _extract_seasons(merged_eps) if merged_eps else {}
+
+    if len(_anime_cache) >= CACHE_MAX:
+        _anime_cache.popitem(last=False)
+    _anime_cache[slug] = {
+        'anime': anime,
+        'episodes': merged_eps,
+        'seasons': seasons,
+        'source': source,
+        'time': now
+    }
+    return anime, merged_eps, seasons, source
 
 def run_search(query):
-    """AnimeDepo indeksinde ara; boş dönerse turkanime.co aramasına düş."""
+    local = []
+    seen_titles = set()
+
+    # AnimeDepo
     try:
-        results = animedepo.Anime.arama_yap(query)
-        if results:
-            return results, None
+        from turkanime_api.sources import animedepo
+        depo_results = animedepo.search_animedepo(query)
+        for slug, title in depo_results:
+            if title and title.lower() not in seen_titles:
+                local.append((f"animedepo:{slug}", title))
+                seen_titles.add(title.lower())
     except Exception:
-        print("[AnimeDepo search error]\n" + traceback.format_exc())
+        pass
 
+    # Filter out sequels/OVAs if the root franchise is already in the results
+    # Sort by length so the shortest title (root) comes first
+    local.sort(key=lambda x: len(x[1]))
+    
+    filtered_local = []
+    for item in local:
+        slug, t = item
+        t_lower = t.lower()
+        is_extension = False
+        
+        for _, k in filtered_local:
+            k_lower = k.lower()
+            if t_lower.startswith(k_lower):
+                if len(t_lower) == len(k_lower) or t_lower[len(k_lower)] in ' :;-.,!?':
+                    is_extension = True
+                    break
+        
+        if not is_extension:
+            filtered_local.append(item)
+            
+    # Sort back by some relevance if needed? AnimeDepo already returns by relevance.
+    # We can preserve the original order by doing a final pass
+    original_order = {item[0]: i for i, item in enumerate(local)}
+    filtered_local.sort(key=lambda x: original_order[x[0]])
+
+    return filtered_local
+
+# ---- Watchlist API ----
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anime data", "watchlist.json")
+
+def load_watchlist():
+    if not os.path.exists(WATCHLIST_FILE):
+        return []
     try:
-        results = turkanime_objects.Anime.arama_yap(query) or []
-        return results, None
+        import json
+        with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
     except Exception:
-        err = traceback.format_exc()
-        print("[Turkanime search error]\n" + err)
-        return [], err
+        return []
+
+def save_watchlist(data):
+    import json
+    with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-DEFAULT_POPULAR_ANIMES = [
-    ("naruto-shippuuden-izle", "Naruto Shippuuden"),
-    ("one-piece-izle", "One Piece"),
-    ("shingeki-no-kyojin-izle", "Shingeki no Kyojin (Attack on Titan)"),
-    ("kimetsu-no-yaiba-izle", "Kimetsu no Yaiba (Demon Slayer)"),
-    ("jujutsu-kaisen-izle", "Jujutsu Kaisen"),
-    ("bleach-izle", "Bleach"),
-    ("death-note-izle", "Death Note"),
-    ("hunter-x-hunter-2011-izle", "Hunter x Hunter"),
-    ("boku-no-hero-academia-izle", "Boku no Hero Academia"),
-    ("fullmetal-alchemist-brotherhood-izle", "Fullmetal Alchemist: Brotherhood"),
-    ("tokyo-ghoul-izle", "Tokyo Ghoul"),
-    ("solo-leveling-izle", "Solo Leveling"),
-]
-
-def get_homepage_data():
-    """Ana sayfa için popüler seriler ve öne çıkan hero banner verisini anında hazırlar."""
-    catalog = DEFAULT_POPULAR_ANIMES
-    featured_item = catalog[0]
-    featured = {
-        "slug": featured_item[0],
-        "title": featured_item[1],
-        "score": "9.1",
-        "summary": f"{featured_item[1]} efsanevi serisi yüksek çözünürlüklü görüntü kalitesi ve kesintisiz Türkçe alt yazı seçeneği ile AnimeHub'da sizleri bekliyor."
+# ---- Bağlantılı Seriler API'si ----
+@app.route('/api/related', methods=['GET'])
+def api_related():
+    title = request.args.get('title')
+    if not title:
+        return jsonify({"error": "No title provided"}), 400
+        
+    query = '''
+    query ($search: String, $id: Int) {
+      Media(search: $search, id: $id, type: ANIME) {
+        id
+        title { romaji english }
+        format
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              title { romaji english }
+              type
+              format
+            }
+          }
+        }
+      }
     }
-    return catalog, featured
+    '''
+    
+    try:
+        from turkanime_api.sources import animedepo
+        
+        def fetch_media(search_title=None, media_id=None):
+            vars = {}
+            if search_title: vars['search'] = search_title
+            if media_id: vars['id'] = media_id
+            res = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': vars}, timeout=5)
+            if not res.ok: return None
+            return res.json().get('data', {}).get('Media')
+            
+        def get_best_title(node):
+            return node['title']['romaji'] or node['title']['english']
 
+        # 1. Kök animeyi bul
+        current_media = fetch_media(search_title=title)
+        if not current_media: return jsonify([])
+        
+        for _ in range(4):
+            prequel_edge = next((e for e in current_media.get('relations', {}).get('edges', []) 
+                                 if e['relationType'] == 'PREQUEL' and e['node']['type'] == 'ANIME'), None)
+            if prequel_edge:
+                p_media = fetch_media(media_id=prequel_edge['node']['id'])
+                if p_media: current_media = p_media
+                else: break
+            else:
+                break
+                
+        # 2. Devam serilerini aşağı doğru tara
+        timeline = []
+        current_node = current_media
+        for _ in range(6):
+            if not current_node: break
+            
+            # Ana seriyi ekle
+            timeline.append({
+                'title': get_best_title(current_node),
+                'relation': 'TV Series' if current_node.get('format') == 'TV' else str(current_node.get('format')),
+                'is_main': True
+            })
+            
+            edges = current_node.get('relations', {}).get('edges', [])
+            
+            # Yan hikayeleri / OVA'ları ekle
+            for e in edges:
+                if e['relationType'] in ['SIDE_STORY', 'OVA', 'SPIN_OFF'] and e['node']['type'] == 'ANIME':
+                    fmt = e['node'].get('format', 'OVA')
+                    timeline.append({
+                        'title': get_best_title(e['node']),
+                        'relation': f"{e['relationType'].replace('_', ' ').title()} ({fmt})",
+                        'is_main': False
+                    })
+                    
+            # Sonraki devam serisine geç
+            sequel_edge = next((e for e in edges if e['relationType'] == 'SEQUEL' and e['node']['type'] == 'ANIME'), None)
+            if sequel_edge:
+                current_node = fetch_media(media_id=sequel_edge['node']['id'])
+            else:
+                break
+
+        # 3. AnimeDepo ile eşleştir
+        final_list = []
+        for item in timeline:
+            rel_title = item['title']
+            depo_results = animedepo.search_animedepo(rel_title)
+            found_slug = None
+            found_title_matched = None
+            
+            for slug, d_title in depo_results:
+                if _is_title_match(d_title, rel_title):
+                    found_slug = f"animedepo:{slug}"
+                    found_title_matched = d_title
+                    break
+                    
+            if found_slug:
+                # Yan hikaye ana anime ile aynıysa kopyaları önlemek için
+                if not any(x['slug'] == found_slug for x in final_list):
+                    final_list.append({
+                        "relation": item['relation'],
+                        "title": found_title_matched,
+                        "slug": found_slug
+                    })
+                    
+        return jsonify(final_list)
+        
+    except Exception as e:
+        print("[Related] Error:", e)
+        return jsonify([])
+        data = res.json()
+        media = data.get('data', {}).get('Media')
+        if not media or not media.get('relations'): return jsonify([])
+        
+        edges = media['relations'].get('edges', [])
+        valid_types = ['SEQUEL', 'PREQUEL', 'SIDE_STORY', 'SPIN_OFF', 'ALTERNATIVE', 'OVA']
+        
+        related_list = []
+        from turkanime_api.sources import animedepo
+        
+        for edge in edges:
+            rel_type = edge.get('relationType')
+            node = edge.get('node', {})
+            if node.get('type') != 'ANIME' or rel_type not in valid_types:
+                continue
+                
+            romaji = node.get('title', {}).get('romaji')
+            english = node.get('title', {}).get('english')
+            rel_title = english or romaji
+            if not rel_title: continue
+            
+            # Search animedepo
+            found_slug = None
+            found_title_matched = None
+            depo_results = animedepo.search_animedepo(rel_title)
+            
+            for slug, d_title in depo_results:
+                if _is_title_match(d_title, romaji) or _is_title_match(d_title, english):
+                    found_slug = f"animedepo:{slug}"
+                    found_title_matched = d_title
+                    break
+            
+            if found_slug:
+                # Format label
+                fmt = node.get('format', 'TV')
+                rel_label = f"{rel_type.replace('_', ' ').title()} ({fmt})"
+                related_list.append({
+                    "relation": rel_label,
+                    "title": found_title_matched,
+                    "slug": found_slug
+                })
+                
+        return jsonify(related_list)
+        
+    except Exception as e:
+        print("[Related] Error:", e)
+        return jsonify([])
+
+@app.route('/api/watchlist', methods=['GET', 'POST', 'DELETE'])
+def api_watchlist():
+    if request.method == 'GET':
+        return jsonify(load_watchlist())
+        
+    try:
+        req_data = request.get_json()
+        if not req_data or 'slug' not in req_data:
+            return jsonify({"error": "Invalid payload"}), 400
+            
+        slug = req_data['slug']
+        title = req_data.get('title', slug)
+        
+        current_list = load_watchlist()
+        
+        if request.method == 'POST':
+            # Add to watchlist
+            if not any(item['slug'] == slug for item in current_list):
+                current_list.append({"slug": slug, "title": title})
+                save_watchlist(current_list)
+                print(f"[Watchlist] Added: {title} ({slug})")
+            return jsonify({"status": "added", "list": current_list})
+            
+        elif request.method == 'DELETE':
+            # Remove from watchlist
+            new_list = [item for item in current_list if item['slug'] != slug]
+            if len(new_list) < len(current_list):
+                save_watchlist(new_list)
+                print(f"[Watchlist] Removed: {slug}")
+            return jsonify({"status": "removed", "list": new_list})
+            
+    except Exception as e:
+        print(f"[Watchlist] Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/")
 def index():
     query = request.args.get("q", "").strip()
     slug = request.args.get("slug")
-
     if slug:
-        anime, episodes, source_name, err = get_anime_detail(slug)
-        if anime is None:
-            return f"<pre>Anime bilgisi alınamadı ({slug}):\n\n{err}</pre>", 502
-        return render_template_string(
-            HTML_TEMPLATE, selected_anime=anime, episodes=episodes, source_name=source_name,
-            query="", watch_slug=None, featured_anime=None, popular_catalog=[])
-
-    results = []
+        anime, eps, seasons, src = get_anime_detail(slug)
+        if not anime: return "<pre>Anime bulunamadı</pre>", 404
+        total_episodes = sum(len(v) for v in seasons.values()) if seasons else len(eps)
+        return render_template('watch.html', selected_anime=anime, episodes=eps,
+                                      seasons=seasons, total_episodes=total_episodes,
+                                      source_name=src, query="", watch_slug=None)
     if query:
-        results, err = run_search(query)
-        if err and not results:
-            return f"<pre>Arama başarısız oldu:\n\n{err}</pre>", 502
-        return render_template_string(
-            HTML_TEMPLATE, results=results, selected_anime=None, query=query,
-            watch_slug=None, featured_anime=None, popular_catalog=[])
+        results = run_search(query)
+        return render_template('index.html', results=results, query=query,
+                                      selected_anime=None, watch_slug=None,
+                                      popular_catalog=None)
+    return render_template('index.html', popular_catalog=POPULAR, query="",
+                                  selected_anime=None, watch_slug=None)
 
-    # Ana Sayfa Görünümü (Anında Yükleme)
-    popular_catalog, featured_anime = get_homepage_data()
-    return render_template_string(
-        HTML_TEMPLATE, results=None, selected_anime=None, query="",
-        watch_slug=None, featured_anime=featured_anime, popular_catalog=popular_catalog)
-
-
+# ---------- Video ----------
 def build_bolum(slug, ep_slug):
-    """Bölüm objesini AnimeDepo (öncelikli), turkanime scrape veya CLI fallback ile kur."""
-    # 1. AnimeDepo doğrudan dene
-    try:
-        anime = animedepo.Anime(slug=slug)
-        bolum = animedepo.Bolum(slug=ep_slug, anime=anime)
-        bolum.get_videos()
-        if bolum._videos:
-            return bolum, None
-    except Exception:
-        print("[AnimeDepo bolum error]\n" + traceback.format_exc())
-
-    # 2. Turkanime scrape dene
-    try:
-        anime = turkanime_objects.Anime(slug=slug)
-        bolum = turkanime_objects.Bolum(slug=ep_slug, anime=anime)
-        bolum.get_videos()
-        if bolum._videos:
-            return bolum, None
-    except Exception:
-        print("[Turkanime bolum error]\n" + traceback.format_exc())
-
-    # 3. Akıllı CLI Fallback: Slug uyuşmazlığında AnimeDepo kataloğunda arama yapıp bölüm videosu çek
-    try:
-        clean_query = slug.replace("-izle", "").replace("-", " ")
-        matches = animedepo.Anime.arama_yap(clean_query)
-        if matches:
-            matched_slug = matches[0][0]
-            anime = animedepo.Anime(slug=matched_slug)
-            bolum = animedepo.Bolum(slug=ep_slug, anime=anime)
-            bolum.get_videos()
-            if bolum._videos:
+    # Live providers first
+    if ":" in ep_slug and not ep_slug.startswith("ecchi_"):
+        try:
+            # We pass ep_slug as anime_slug_full so chain.py can extract the prefix from it
+            streams = live_chain.get_episode_streams(ep_slug, ep_slug)
+            if streams:
+                class LiveBolum:
+                    def __init__(self):
+                        self._videos = []
+                bolum = LiveBolum()
+                from turkanime_api.animecix import Video, Anime, Bolum
+                for s in streams:
+                    v = Video(None, s["url"])
+                    v._url = s["url"]
+                    v._is_working = True
+                    label = s.get("label", "Video")
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        v.player, v.fansub = parts[0], parts[1]
+                    else:
+                        v.player, v.fansub = label, "AnimeDepo"
+                    v.type = s.get("type", "video")
+                    bolum._videos.append(v)
+                
+                # UNIONIZE: Check for Ecchicix streams
+                from flask import request
+                anime_obj, _, _, _ = get_anime_detail(slug)
+                title = anime_obj.title if anime_obj else ""
+                ep_t = request.args.get("title", "") or ep_slug
+                if title:
+                    target_num = None
+                    am = re.search(r'(\d+)\s*\.?\s*[Bb]ölüm', ep_t)
+                    if not am: am = re.search(r'[Bb]ölüm\s*(\d+)', ep_t)
+                    if not am:
+                        anums = re.findall(r'(\d+)', ep_t)
+                        if anums: target_num = int(anums[-1])
+                    else:
+                        target_num = int(am.group(1))
+                        
+                    if target_num is not None:
+                        cix_results = Anime.arama_yap(title)
+                        for cix_slug, cix_title in cix_results:
+                            if _is_title_match(cix_title, title) and str(cix_slug).startswith("ecchi_"):
+                                test_anime = Anime(slug=cix_slug)
+                                eps = test_anime.get_bolum_listesi()
+                                if eps:
+                                    for ecchi_ep_s, ecchi_ep_t in eps:
+                                        anums2 = re.findall(r'(\d+)', ecchi_ep_t)
+                                        if anums2 and int(anums2[-1]) == target_num:
+                                            # Fetch streams for this ecchi episode!
+                                            ecchi_bolum = Bolum(slug=ecchi_ep_s, anime=test_anime)
+                                            ecchi_bolum.get_videos()
+                                            if ecchi_bolum._videos:
+                                                for v in ecchi_bolum._videos:
+                                                    if not getattr(v, "fansub", ""):
+                                                        v.fansub = "Ecchicix"
+                                                    else:
+                                                        v.fansub = f"Ecchicix - {v.fansub}"
+                                                    bolum._videos.append(v)
+                                            break
+                                break
                 return bolum, None
-    except Exception:
-        print("[AnimeDepo fallback bolum error]\n" + traceback.format_exc())
-
-    return None, "Bölüm kaynak videoları hiçbir sağlayıcıdan (AnimeDepo & Turkanime) yüklenemedi."
+        except Exception as e:
+            return None, str(e)
 
 
-def pick_video(bolum, requested_player=None):
-    """Oynatıcı önceliğine göre sırala ve çalışan ilk videoyu bul."""
+
+    # 2. Local (animecix/ecchicix)
+    try:
+        anime = animecix.Anime(slug=slug)
+        bolum = animecix.Bolum(slug=ep_slug, anime=anime)
+        bolum.get_videos()
+        if bolum._videos:
+            for v in bolum._videos: v._provider = "animecix"
+            return bolum, None
+    except Exception as e:
+        print(f"[build_bolum] Local error: {e}")
+
+    return None, "Hiçbir sağlayıcıdan video bulunamadı."
+
+def pick_video(bolum, requested_player=None, requested_fansub=None):
     vids = [v for v in bolum._videos if v.is_supported]
     if requested_player:
         matched = [v for v in vids if v.player == requested_player]
-        if matched:
-            vids = matched
-    vids = sorted(
-        vids,
-        key=lambda v: turkanime_objects.SUPPORTED.index(v.player)
-        if v.player in turkanime_objects.SUPPORTED else 99)
-    last_error = None
+        if requested_fansub is not None:
+            matched_with_fs = [v for v in matched if getattr(v, "fansub", "") == requested_fansub]
+            if matched_with_fs:
+                matched = matched_with_fs
+        if matched: vids = matched
     for v in vids:
         try:
-            if v.is_working:
-                return v, None
-        except Exception:
-            last_error = traceback.format_exc()
-    return None, last_error or "Hiçbir kaynak çalışmıyor."
-
+            if v.is_working: return v, None
+        except Exception: continue
+    return None, "Çalışan video bulunamadı."
 
 def resolve_stream(vid):
-    """yt-dlp'nin çözdüğü doğrudan medya linkini çıkar."""
-    info = vid.info or {}
-    direct = info.get("url")
-    candidate = direct or vid.url
-    if not candidate:
-        return None, None
-    if ".m3u8" in candidate:
-        return candidate, "hls"
-    if info.get("ext") in ("mp4", "webm", "mkv", "m4v"):
-        return candidate, "video"
+    candidate = vid.url
+    if not candidate: return None, None
+    if ".m3u8" in candidate: return candidate, "hls"
+    if ".mp4" in candidate: return candidate, "video"
     return candidate, "iframe"
-
 
 @app.route("/watch")
 def watch():
     slug = request.args.get("slug")
     ep_slug = request.args.get("ep")
+    if not ep_slug:
+        return redirect(f"/?slug={slug}")
     ep_title = request.args.get("title") or ep_slug
     requested_player = request.args.get("player")
+    requested_fansub = request.args.get("fansub")
 
-    bolum, build_err = build_bolum(slug, ep_slug)
+    bolum, err = build_bolum(slug, ep_slug)
+
+    grouped_videos = OrderedDict()
+    stream_url = stream_kind = player_name = fansub_name = player_error = None
+    
     if bolum is None:
-        return f"<pre>Bölüm yüklenemedi:\n\n{build_err}</pre>", 502
-
-    other_players = list(dict.fromkeys(v.player for v in bolum._videos if v.is_supported))
-
-    stream_url, stream_kind, player_name, player_error = None, None, None, None
-    vid, pick_err = pick_video(bolum, requested_player)
-    if vid is None:
-        player_error = pick_err
+        player_error = err
     else:
-        player_name = vid.player
-        try:
-            stream_url, stream_kind = resolve_stream(vid)
-            if not stream_url:
-                player_error = "Kaynak linki çözülemedi."
-        except Exception:
-            player_error = traceback.format_exc()
+        for v in bolum._videos:
+            if not v.is_supported: continue
+            fs = getattr(v, 'fansub', '') or 'Varsayılan'
+            if fs not in grouped_videos:
+                grouped_videos[fs] = OrderedDict()
+            if v.player not in grouped_videos[fs]:
+                grouped_videos[fs][v.player] = v
 
-    anime_title = slug.replace("-izle", "").replace("-", " ").title()
+        vid, pick_err = pick_video(bolum, requested_player, requested_fansub)
+        if vid is None:
+            player_error = pick_err
+        else:
+            player_name = vid.player
+            fansub_name = getattr(vid, 'fansub', '') or 'Varsayılan'
+            try:
+                stream_url, stream_kind = resolve_stream(vid)
+                if not stream_url:
+                    player_error = "Stream çözülemedi."
+            except Exception:
+                player_error = traceback.format_exc()
 
-    return render_template_string(
-        HTML_TEMPLATE, selected_anime=None, results=None,
-        watch_slug=slug, ep_slug=ep_slug, ep_title=ep_title, anime_title=anime_title,
-        query="", stream_url=stream_url, stream_kind=stream_kind,
-        player_name=player_name, player_error=player_error,
-        other_players=other_players, featured_anime=None, popular_catalog=[])
+    anime_detail_obj, merged_eps, seasons, source_type = get_anime_detail(slug)
+    anime_title = anime_detail_obj.title if anime_detail_obj else slug
+    
+    # Calculate Next Episode
+    next_ep_slug = None
+    next_ep_title = None
+    if merged_eps:
+        for i, (e_slug, e_title) in enumerate(merged_eps):
+            if e_slug == ep_slug and i + 1 < len(merged_eps):
+                next_ep_slug = merged_eps[i+1][0]
+                next_ep_title = merged_eps[i+1][1]
+                break
+
+    return render_template('watch.html',
+        selected_anime=anime_detail_obj, results=None,
+        watch_slug=slug, ep_slug=ep_slug, ep_title=ep_title,
+        anime_title=anime_title, query="",
+        stream_url=stream_url, stream_kind=stream_kind,
+        player_error=player_error, 
+        current_player=player_name, current_fansub=fansub_name,
+        grouped_videos=grouped_videos,
+        next_ep_slug=next_ep_slug, next_ep_title=next_ep_title,
+        seasons=seasons, episodes=merged_eps)
+
+@app.route("/api/refresh_catalog", methods=["GET", "POST"])
+def api_refresh_catalog():
+    try:
+        msg = animecix.trigger_manual_update()
+        return jsonify({"status": "success", "message": msg})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/update-catalog")
+def update_catalog():
+    try:
+        msg = animecix.trigger_manual_update()
+        return f"<pre>{msg}</pre><p><a href='/'>Ana Sayfa</a></p>"
+    except Exception as e:
+        return f"<pre>Güncelleme başlatılamadı: {e}</pre>"
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

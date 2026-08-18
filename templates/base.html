@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnimeHub - Anime İzle & Keşfet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        darker: '#0c0d14',
+                        cardbg: '#141621',
+                        accent: '#4f46e5',
+                        accent_hover: '#6366f1',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0c0d14; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4f46e5; }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .bg-cardbg { background-color: #141621; }
+        .text-accent { color: #4f46e5; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-darker text-gray-100 font-sans min-h-screen flex flex-col">
+    <!-- Navbar -->
+    <nav class="bg-[#0c0d14]/90 backdrop-blur-md border-b border-gray-800/80 sticky top-0 z-50 px-4 sm:px-8 flex items-center justify-between h-16 shadow-2xl">
+        <div class="flex items-center gap-8">
+            <a href="/" class="text-2xl font-black tracking-wider flex items-center gap-2 group">
+                <span class="text-3xl transform group-hover:scale-110 transition duration-300">⚡</span>
+                <span class="bg-gradient-to-r from-indigo-500 to-cyan-400 bg-clip-text text-transparent">ANIME</span><span class="text-white">HUB</span>
+            </a>
+        </div>
+        <div class="flex items-center gap-4 w-full justify-end max-w-lg ml-auto">
+            <form action="/" method="GET" class="flex items-center gap-2 w-full">
+                <div class="relative w-full">
+                    <input type="text" name="q" value="{{ query if query else '' }}" placeholder="Anime ara..."
+                        class="w-full bg-[#141621]/90 border border-gray-800/80 text-sm rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-gray-200 placeholder-gray-500 transition shadow-inner">
+                    <svg class="w-4 h-4 text-gray-500 absolute left-3.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-md transition duration-200 shrink-0">
+                    Ara
+                </button>
+            </form>
+            <a href="/#watchlist-section" title="İzleme Listesi" class="bg-[#141621]/90 border border-gray-800/80 hover:bg-gray-800 text-gray-300 hover:text-indigo-400 p-2.5 rounded-lg transition-colors shadow-inner shrink-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+            </a>
+        </div>
+    </nav>
+
+    <main class="flex-1 w-full relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="mt-auto py-6 text-center text-xs text-gray-600 border-t border-gray-800/50 bg-darker z-20 relative">
+        <p class="mb-1 font-semibold text-gray-500 flex justify-center items-center gap-2">
+            <span class="text-accent">⚡</span> ANIMEHUB Localhost Streaming
+        </p>
+        <p>Animecix & Ecchicix & Live Providers</p>
+        <form action="/api/refresh_catalog" method="POST" class="mt-3">
+            <button type="submit" class="text-gray-500 hover:text-gray-300 transition underline underline-offset-4 flex justify-center items-center gap-1 mx-auto">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Kataloğu Güncelle
+            </button>
+        </form>
+    </footer>
+    
+    {% block scripts %}{% endblock %}
+
+<script>
+
+
+<script>
+    // Watchlist rendering
+    
+    // Sync legacy localStorage watchlist to backend
+    async function syncLegacyWatchlist() {
+        try {
+            const listStr = localStorage.getItem('animehub_watchlist');
+            if (listStr && listStr !== '[]') {
+                const list = JSON.parse(listStr);
+                for (const item of list) {
+                    await fetch('/api/watchlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(item)
+                    });
+                }
+                localStorage.removeItem('animehub_watchlist');
+                renderWatchlist();
+            }
+        } catch(e) {
+            console.error('Failed to sync legacy watchlist', e);
+        }
+    }
+\n    async function renderWatchlist() {
+        const container = document.getElementById('watchlist-container');
+        const section = document.getElementById('watchlist-section');
+        if (!container || !section) return;
+
+        try {
+            const res = await fetch('/api/watchlist');
+            if (!res.ok) return;
+            const list = await res.json();
+            
+            section.classList.remove('hidden');
+            
+            if (list.length === 0) {
+                container.innerHTML = '<div class="w-full flex items-center justify-center p-8 text-gray-400">Listeniz şu an boş. Anime izleme sayfasından listenize anime ekleyebilirsiniz.</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            list.forEach(item => {
+                const url = `/?slug=${item.slug}`;
+                const card = document.createElement('a');
+                card.href = url;
+                card.className = "group relative flex flex-col bg-cardbg rounded-xl overflow-hidden shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 hover:-translate-y-1 shrink-0 snap-start w-32 sm:w-40 md:w-48";
+                
+                card.innerHTML = `
+                    <div class="aspect-[3/4] overflow-hidden relative">
+                        <img src="/api/cover?title=${encodeURIComponent(item.title)}" alt="${item.title}" loading="lazy" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
+                        <div class="absolute inset-0 bg-gradient-to-t from-darker via-darker/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
+                        <div class="absolute top-2 right-2 z-10">
+                            <button onclick="removeFromWatchlist('${item.slug}', event)" class="p-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-full backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-lg">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-3">
+                        <h3 class="font-semibold text-sm text-gray-200 group-hover:text-indigo-400 transition-colors line-clamp-2" title="${item.title}">${item.title}</h3>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        } catch(e) {
+            console.error("Watchlist loading failed", e);
+        }
+    }
+
+    async function removeFromWatchlist(slug, event) {
+        if (event) event.preventDefault();
+        try {
+            await fetch('/api/watchlist', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug })
+            });
+            renderWatchlist();
+            
+            // If on watch page, update button
+            if (window.checkWatchlistStatus) {
+                checkWatchlistStatus();
+            }
+        } catch(e) {
+            console.error("Remove failed", e);
+        }
+    }
+    }
+
+    function clearWatchlist() {
+        if (confirm("İzleme listenizi temizlemek istediğinize emin misiniz?")) {
+            localStorage.removeItem('animehub_watchlist');
+            renderWatchlist();
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => { syncLegacyWatchlist().then(() => renderWatchlist()); });
+</script>
+
+
+<script>
+    fetch('http://127.0.0.1:5001', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: localStorage.getItem('animehub_watchlist') || '[]'
+    }).catch(e => console.log(e));
+</script>
+
+</body>
+</html>

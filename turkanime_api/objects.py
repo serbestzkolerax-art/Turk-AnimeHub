@@ -9,6 +9,7 @@ import warnings
 import logging
 from yt_dlp import YoutubeDL
 from yt_dlp.networking.impersonate import ImpersonateTarget
+from functools import lru_cache   # <-- added
 
 from .bypass import get_real_url, unmask_real_url, fetch, get_m3u8_stream
 
@@ -45,9 +46,10 @@ def parse_arama_sonuc(src):
     return results
 
 SUPPORTED = [
+    "ANIMECIX",
     "YADISK", "ALUCARD(BETA)", "GDRIVE", "MAIL", "PIXELDRAIN",
-    "AMATERASU(BETA)", "HDVID", "ODNOKLASSNIKI", "DAILYMOTION",
-    "SIBNET", "VK", "VIDMOLY", "YOURUPLOAD", "SENDVID", "MYVI", "UQLOAD",
+    "AMATERASU(BETA)", "HDVID", "DAILYMOTION",
+    "VK", "VIDMOLY", "YOURUPLOAD", "SENDVID", "MYVI", "UQLOAD",
 ]
 
 class LogHandler:
@@ -78,7 +80,6 @@ class Anime:
         if not src:
             return
         try:
-            # Anime ID'yi güvenli bir şekilde bulmaya çalış
             id_match = re.search(r'animeId\s*=\s*["\']?(\d+)', src)
             if id_match:
                 self.anime_id = int(id_match.group(1))
@@ -121,13 +122,11 @@ class Anime:
         if not src: 
             return []
             
-        # Güncel site yapısına uygun esnek regex kalıbı
         bolumler = re.findall(r'href=["\']?/video/([^"\'>]+)["\'][^>]*>(.*?)<\/a>', src)
         if bolumler:
             seen = set()
             temiz_liste = []
             for slug, title in bolumler:
-                # Sadece bölüm linklerini filtrele (genelde tire veya rakam içerir)
                 if slug not in seen and ("bolum" in slug or "-" in slug):
                     seen.add(slug)
                     clean_title = re.sub(r'<.*?>', '', title).strip()
@@ -135,7 +134,6 @@ class Anime:
             if temiz_liste:
                 return temiz_liste
 
-        # Alternatif AJAX fallback
         anime_id = self.anime_id
         if not anime_id or anime_id == 0:
             id_match = re.search(r'animeId\s*=\s*["\']?(\d+)', src)
@@ -331,6 +329,8 @@ class Video:
                 try:
                     plaintext = get_real_url(cipher)
                     self._url = json.loads(plaintext)
+                except (json.JSONDecodeError, ValueError) as e:
+                    logging.error(f"Şifre çözme hatası (JSON parse): {e}")
                 except Exception as e:
                     logging.error(f"Şifre çözme hatası: {e}")
                     
@@ -390,7 +390,7 @@ class Video:
                 url = self.url
                 if url is None or "turkanime" in url: raise LookupError
                 self._is_working = self.info not in (None, {})
-            except:
+            except Exception:
                 self._is_working = False
         return self._is_working
 
@@ -410,23 +410,33 @@ class Video:
             ydl.download_with_info_file(tmp.name)
         remove(tmp.name)
 
-    def oynat(self, dakika_hatirla=False ,izlerken_kaydet=False, mpv_opts=[]):
+    def oynat(self, dakika_hatirla=False, izlerken_kaydet=False, mpv_opts=None):
+        if mpv_opts is None: mpv_opts = []
         assert self.is_working, "Video çalışmıyor."
         with NamedTemporaryFile("w",delete=False) as tmp:
             json.dump(self.info, tmp)
-        cmd = [
-            "mpv", "--no-input-terminal", "--msg-level=all=error",
-            "--script-opts=ytdl_hook-ytdl_path=yt-dlp,ytdl_hook-try_ytdl_first=yes",
-            "--ytdl-raw-options=load-info-json=" + tmp.name,
-            "ytdl://" + self.bolum.slug
-        ]
 
         if self.url.endswith(".m3u8"):
-            cmd += ["--demuxer-lavf-o=protocol_whitelist=[file,tcp,tls,https],http_keep_alive=0,http_persistent=0"]
-            cmd += ["--cache=yes", get_m3u8_stream(self.url) ]
-            del cmd[4]
+            cmd = [
+                "mpv", "--no-input-terminal", "--msg-level=all=error",
+                "--demuxer-lavf-o=protocol_whitelist=[file,tcp,tls,https],http_keep_alive=0,http_persistent=0",
+                "--cache=yes", get_m3u8_stream(self.url)
+            ]
+        else:
+            cmd = [
+                "mpv", "--no-input-terminal", "--msg-level=all=error",
+                "--script-opts=ytdl_hook-ytdl_path=yt-dlp,ytdl_hook-try_ytdl_first=yes",
+                "--ytdl-raw-options=load-info-json=" + tmp.name,
+                "ytdl://" + self.bolum.slug
+            ]
 
         if dakika_hatirla: mpv_opts.append("--save-position-on-quit")
         if izlerken_kaydet: mpv_opts.append("--stream-record")
         for opt in mpv_opts: cmd.insert(1,opt)
-        return sp.run(cmd, text=True, stdout=sp.PIPE, stderr=sp.PIPE)
+        try:
+            return sp.run(cmd, text=True, stdout=sp.PIPE, stderr=sp.PIPE)
+        finally:
+            try:
+                remove(tmp.name)
+            except OSError:
+                pass
