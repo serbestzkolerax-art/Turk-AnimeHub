@@ -46,6 +46,8 @@ def _find_data_dir():
 
 _DATA_DIR = _find_data_dir()
 
+_ANIMES_PATH   = os.path.join(_DATA_DIR, "animes.json")
+_EPISODES_PATH = os.path.join(_DATA_DIR, "episodes.json")
 _ECCHICIX_ANIMES_PATH   = os.path.join(_DATA_DIR, "ecchicix_animes.json")
 _ECCHICIX_EPISODES_PATH = os.path.join(_DATA_DIR, "ecchicix_episodes.json")
 
@@ -65,8 +67,8 @@ def _ensure_json(path, default=None):
             json.dump(default, f, ensure_ascii=False, indent=2)
     return _load_json(path)
 
-_ANIMES = []
-_EPISODES = []
+_ANIMES = _ensure_json(_ANIMES_PATH)
+_EPISODES = _ensure_json(_EPISODES_PATH)
 _ECCHICIX_ANIMES = _ensure_json(_ECCHICIX_ANIMES_PATH)
 _ECCHICIX_EPISODES = _ensure_json(_ECCHICIX_EPISODES_PATH)
 
@@ -122,8 +124,8 @@ def _run_async_update():
 
 def reload_catalog():
     global _ANIMES, _EPISODES, _ANIME_BY_TITLE, _ANIME_TITLE_BY_ID, _EPISODE_BY_ID
-    _ANIMES = []
-    _EPISODES = []
+    _ANIMES = _load_json(_ANIMES_PATH) or []
+    _EPISODES = _load_json(_EPISODES_PATH) or []
     ecchianimes = _load_json(_ECCHICIX_ANIMES_PATH) or []
     ecchiepisodes = _load_json(_ECCHICIX_EPISODES_PATH) or []
     for item in ecchianimes:

@@ -466,31 +466,57 @@ def _merge_all_episodes_for_title(title):
     all_eps = {}
 
     def parse_sn_en(slug, ep_title):
+        m = re.match(r'^(\d+)\.\s*[Ss]ezon\s*(\d+)\.\s*[Bb]', str(ep_title))
+        if m:
+            return int(m.group(1)), float(m.group(2))
+
         m = re.match(r'^(\d+)-([\d\.]+)$', str(slug))
         if m:
             return int(m.group(1)), float(m.group(2))
-        sm = re.search(r'(\d+)\.?\s*[Ss]ezon', str(ep_title))
+        
+        sm = re.search(r'(?i)(\d+)(?:st|nd|rd|th)?\.?\s*(?:sezon|season)', str(ep_title))
         season = int(sm.group(1)) if sm else 1
-        em = re.search(r'(\d+)\s*\.?\s*[Bb]ölüm', str(ep_title))
+        
+        em = re.search(r'(?i)(\d+)\s*\.?\s*(?:b\w*l\w*m|ep)', str(ep_title))
         if not em:
-            em = re.search(r'[Bb]ölüm\s*(\d+)', str(ep_title))
+            em = re.search(r'(?i)(?:b\w*l\w*m|ep)\s*(\d+)', str(ep_title))
+            
         if not em:
             nums = re.findall(r'(\d+)', str(ep_title))
-            ep = float(nums[-1]) if nums else 0.0
+            if nums:
+                if sm and sm.group(1) in nums:
+                    nums.remove(sm.group(1))
+                ep = float(nums[-1]) if nums else 0.0
+            else:
+                ep = 0.0
         else:
             ep = float(em.group(1))
         return season, ep
-
+    
     import concurrent.futures
 
     def fetch_local():
         try:
             results = animecix.Anime.arama_yap(title)
+            is_fallback = False
+            if not results:
+                t = re.sub(r'(?i)\d+(st|nd|rd|th)?\s*[Ss]eason', '', title)
+                t = re.sub(r'(?i)[Ss]eason\s*\d+', '', t)
+                t = re.sub(r'(?i)part\s*\d+', '', t)
+                base_title = re.sub(r'\s+', ' ', t).strip()
+                if base_title != title:
+                    results = animecix.Anime.arama_yap(base_title)
+                    is_fallback = True
+
             for slug, res_title in results:
-                q = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower().strip())
+                search_t = base_title if is_fallback else title
+                q = re.sub(r'[^a-zA-Z0-9\s]', '', search_t.lower().strip())
                 s_clean = str(slug).split(':', 1)[-1].replace('-', ' ').lower().strip()
-                if _is_title_match(res_title, title) or q == s_clean or q in s_clean:
+                if _is_title_match(res_title, search_t) or q == s_clean or q in s_clean:
                     anime = animecix.Anime(slug=slug)
+                    # If this is a fallback for an OVA/Special, don't return the main anime's episodes!
+                    if is_fallback and re.search(r'(?i)(ova|special)', title):
+                        return []
                     return anime.get_bolum_listesi() or []
         except Exception:
             pass
