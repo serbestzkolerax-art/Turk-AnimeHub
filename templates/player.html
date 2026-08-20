@@ -13,7 +13,7 @@
 </div>
 
 {% if stream_url %}
-    <div class="w-full aspect-video bg-black relative">
+    <div class="w-full aspect-video bg-black relative group">
         {% if stream_kind == "video" %}
             <video src="{{ stream_url }}" controls autoplay class="w-full h-full object-contain"></video>
         {% elif stream_kind == "hls" %}
@@ -32,6 +32,14 @@
             </script>
         {% else %}
             <iframe src="{{ stream_url }}" class="w-full h-full" allowfullscreen frameborder="0"></iframe>
+        {% endif %}
+        
+        {% if next_ep_slug %}
+        <a href="/watch?slug={{ watch_slug }}&ep={{ next_ep_slug }}&title={{ next_ep_title|urlencode }}" 
+           class="absolute bottom-[20%] right-4 z-50 bg-black/80 hover:bg-indigo-600 text-white font-bold py-2.5 px-5 rounded-lg shadow-2xl backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center gap-2 border border-white/10 pointer-events-auto">
+            <span>Sonraki Bolum</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"/></svg>
+        </a>
         {% endif %}
     </div>
 {% else %}

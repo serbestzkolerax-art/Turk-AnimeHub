@@ -246,16 +246,17 @@ def get_anilist_cover(title):
     clean = re.sub(r'[^\w\s]', ' ', clean).strip()
     if not clean: clean = str(title)
     
+    # MAL is the 1st choice for covers
+    mal_cover = search_mal_cover(clean)
+    if mal_cover:
+        return mal_cover
+        
+    # Fallback to AniList if MAL fails
     try:
         data = fetch_media(search_title=clean)
         if data and data.get("coverImage") and data["coverImage"].get("large"):
             return data["coverImage"]["large"]
     except Exception: pass
-    
-    # Fallback to MyAnimeList direct scraping if AniList completely failed
-    mal_cover = search_mal_cover(clean)
-    if mal_cover:
-        return mal_cover
         
     return DEFAULT_COVER
 
