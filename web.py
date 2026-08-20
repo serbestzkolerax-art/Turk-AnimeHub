@@ -850,41 +850,45 @@ def api_related():
                     "cover": item.get('cover')
                 })
                 
-        # If the requested title (e.g. Commemorative Special) is missing from AniList's chronology, inject it!
-        found = False
-        for item in final_list:
-            if title.lower() == item['title'].lower():
-                found = True
-                break
-        
-        if not found:
-            import re
-            search_t = re.sub(r'(?i)(Commemorative Special|Special|Specials|OVA|ONA)', '', title).strip().lower()
-            injected = False
-            for i, item in enumerate(final_list):
-                if search_t in item['title'].lower() or item['title'].lower() in search_t:
-                    new_slug = None
-                    search_res = live_chain.search_all(title, limit=1)
-                    if search_res: new_slug = search_res[0][0]
-                    final_list.insert(i+1, {
-                        "title": title, 
-                        "relation": "OVA", 
-                        "slug": new_slug,
-                        "cover": item.get('cover')
-                    })
-                    injected = True
-                    break
-            if not injected:
-                new_slug = None
-                search_res = live_chain.search_all(title, limit=1)
-                if search_res: new_slug = search_res[0][0]
-                final_list.append({
-                    "title": title, 
-                    "relation": "OVA", 
-                    "slug": new_slug,
-                    "cover": None
-                })
-                    
+        # Global Inject: Search AnimeDepo for the base title, and inject ANY missing series into the timeline!
+        import re
+        base_title_clean = re.sub(r'(?i)\\b(Commemorative Special|Special|Specials|OVA|ONA|Movie)\\b', '', title).strip()
+        from turkanime_api.sources import animedepo as animedepo_source
+        try:
+            depo_results = animedepo_source.search_animedepo(base_title_clean, limit=15)
+            for d_slug, d_title in depo_results:
+                # Check if this depo title is already in our final_list
+                found = False
+                for item in final_list:
+                    if item['title'].lower() == d_title.lower():
+                        found = True
+                        break
+                if not found:
+                    # Is this depo result actually related to our base anime?
+                    if base_title_clean.lower() in d_title.lower():
+                        # Find the best place to inject it
+                        search_t = re.sub(r'(?i)\\b(Commemorative Special|Special|Specials|OVA|ONA|Movie)\\b', '', d_title).strip().lower()
+                        injected = False
+                        for i, item in enumerate(final_list):
+                            if search_t in item['title'].lower() or item['title'].lower() in search_t:
+                                final_list.insert(i+1, {
+                                    "title": d_title,
+                                    "relation": "OVA/Special",
+                                    "slug": "animedepo:" + str(d_slug),
+                                    "cover": item.get('cover')
+                                })
+                                injected = True
+                                break
+                        if not injected:
+                            final_list.append({
+                                "title": d_title,
+                                "relation": "OVA/Special",
+                                "slug": "animedepo:" + str(d_slug),
+                                "cover": final_list[0].get('cover') if final_list else None
+                            })
+        except Exception as e:
+            print("[Related] Error injecting AnimeDepo items:", e)
+            
         return jsonify(final_list)
         
     except Exception as e:
