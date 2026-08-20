@@ -868,18 +868,23 @@ def api_related():
                     if base_title_clean.lower() in d_title.lower():
                         # Find the best place to inject it
                         search_t = re.sub(r'(?i)\\b(Commemorative Special|Special|Specials|OVA|ONA|Movie)\\b', '', d_title).strip().lower()
-                        injected = False
+                        # Find the best place to inject it (longest matching title)
+                        best_match_idx = -1
+                        best_match_len = -1
                         for i, item in enumerate(final_list):
                             if search_t in item['title'].lower() or item['title'].lower() in search_t:
-                                final_list.insert(i+1, {
-                                    "title": d_title,
-                                    "relation": "OVA/Special",
-                                    "slug": "animedepo:" + str(d_slug),
-                                    "cover": item.get('cover')
-                                })
-                                injected = True
-                                break
-                        if not injected:
+                                if len(item['title']) > best_match_len:
+                                    best_match_len = len(item['title'])
+                                    best_match_idx = i
+                        
+                        if best_match_idx != -1:
+                            final_list.insert(best_match_idx+1, {
+                                "title": d_title,
+                                "relation": "OVA/Special",
+                                "slug": "animedepo:" + str(d_slug),
+                                "cover": final_list[best_match_idx].get('cover')
+                            })
+                        else:
                             final_list.append({
                                 "title": d_title,
                                 "relation": "OVA/Special",
