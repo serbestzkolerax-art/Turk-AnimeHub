@@ -665,7 +665,7 @@ def api_related():
             
             # Yan hikayeleri / OVA'larÄ± ekle
             for e in edges:
-                if e['relationType'] in ['SIDE_STORY', 'OVA', 'SPIN_OFF'] and e['node']['type'] == 'ANIME':
+                if e['relationType'] in ['SIDE_STORY', 'OVA', 'SPIN_OFF', 'OTHER', 'ALTERNATIVE', 'SUMMARY'] and e['node']['type'] == 'ANIME':
                     fmt = e['node'].get('format', 'OVA')
                     timeline.append({
                         'title': get_best_title(e['node']),
@@ -680,28 +680,34 @@ def api_related():
             else:
                 break
 
-        # 3. AnimeDepo ile eÅŸleÅŸtir
+        # 3. Eşleştirme ve Son Liste
+        from turkanime_api.sources import chain as live_chain
         final_list = []
+        seen_titles = set()
+        
         for item in timeline:
             rel_title = item['title']
-            depo_results = animedepo.search_animedepo(rel_title)
             found_slug = None
-            found_title_matched = None
+            found_title_matched = rel_title
             
-            for slug, d_title in depo_results:
+            # Hızlıca tüm kaynaklarda ara
+            search_results = live_chain.search_all(rel_title, limit=5)
+            
+            for slug, d_title in search_results:
                 if _is_title_match(d_title, rel_title):
-                    found_slug = f"animedepo:{slug}"
+                    found_slug = slug
                     found_title_matched = d_title
                     break
                     
-            if found_slug:
-                # Yan hikaye ana anime ile aynÄ±ysa kopyalarÄ± Ã¶nlemek iÃ§in
-                if not any(x['slug'] == found_slug for x in final_list):
-                    final_list.append({
-                        "relation": item['relation'],
-                        "title": found_title_matched,
-                        "slug": found_slug
-                    })
+            # Başlık tekrarını önle
+            normalized_title = re.sub(r'[^a-z0-9]', '', found_title_matched.lower())
+            if normalized_title not in seen_titles:
+                seen_titles.add(normalized_title)
+                final_list.append({
+                    "relation": item['relation'],
+                    "title": found_title_matched,
+                    "slug": found_slug
+                })
                     
         return jsonify(final_list)
         
