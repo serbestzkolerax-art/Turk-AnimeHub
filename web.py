@@ -1,3 +1,5 @@
+import threading
+import json
 import sys, os, time, traceback, re, functools, requests
 import subprocess, zipfile, io
 from collections import OrderedDict
@@ -107,6 +109,29 @@ DEFAULT_COVER = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=
 
 _anilist_cache = OrderedDict()
 
+# --- DISK CACHE & RATE LIMIT LOCK ---
+ANILIST_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anime data", "anilist_cache.json")
+_anilist_lock = threading.Lock()
+
+def load_anilist_cache():
+    global _anilist_cache
+    if os.path.exists(ANILIST_CACHE_FILE):
+        try:
+            with open(ANILIST_CACHE_FILE, 'r', encoding='utf-8') as f:
+                _anilist_cache.update(json.load(f))
+        except: pass
+
+def save_anilist_cache():
+    try:
+        with open(ANILIST_CACHE_FILE, 'w', encoding='utf-8') as f:
+            # Sadece son 500 öğeyi kaydet ki dosya şişmesin
+            keys = list(_anilist_cache.keys())[-500:]
+            to_save = {k: _anilist_cache[k] for k in keys}
+            json.dump(to_save, f)
+    except: pass
+
+load_anilist_cache()
+
 def fetch_media(search_title=None, media_id=None):
     cache_key = f"{search_title}_{media_id}"
     if cache_key in _anilist_cache:
@@ -135,17 +160,26 @@ def fetch_media(search_title=None, media_id=None):
       }
     }
     '''
-    import time
-    
+    import threading
     def _do_req(st=None, mid=None):
-        vars = {}
-        if st: vars['search'] = st
-        if mid: vars['id'] = mid
-        res = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': vars}, timeout=5)
-        if res.status_code == 429:
-            time.sleep(1.5)
-            res = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': vars}, timeout=5)
-        if not res.ok: return None
+        variables = {}
+        if st: variables['search'] = st
+        if mid: variables['id'] = mid
+        for _ in range(3):
+            try:
+                with _anilist_lock:
+                    r = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': variables}, timeout=5)
+                    if r.status_code == 429:
+                        time.sleep(2.5) # Wait out the rate limit
+                        continue
+                    if r.ok:
+                        data = r.json()
+                        return data.get('data', {}).get('Media')
+                    # Hata varsa biraz bekle
+                    time.sleep(0.5)
+            except Exception:
+                time.sleep(0.5)
+        return None
         return res.json().get('data', {}).get('Media')
 
     try:
