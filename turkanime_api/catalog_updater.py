@@ -53,7 +53,7 @@ async def _fetch_search(site, query, session, anime_dict, lock, semaphore):
                 await asyncio.sleep(0.5)
 
 async def _scrape_catalog(site):
-    list(string.ascii_lowercase) + [str(i) for i in range(10)] + ['.', '-']
+    chars = list(string.ascii_lowercase) + [str(i) for i in range(10)] + ['.', '-']
     queries = [c1 + c2 for c1 in chars for c2 in chars]
 
     anime_dict = {}
@@ -197,8 +197,6 @@ async def _update_site(site, animes_path, episodes_path):
 
 async def run_full_update():
     success = True
-    if not await _update_site("animecix", ANIMECIX_ANIMES, ANIMECIX_EPISODES):
-        success = False
     
     if not await _update_site("ecchicix", ECCHICIX_ANIMES, ECCHICIX_EPISODES):
         success = False
