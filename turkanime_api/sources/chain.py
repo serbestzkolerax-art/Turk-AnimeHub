@@ -4,7 +4,7 @@ from . import anizle, openani, animecix, animedepo, tranimaci, animely
 from . import PROVIDERS, get_provider_by_priority
 
 # All live providers ( re‑enabled) + AnimeDepo + Tranimaci + Anizle
-SEARCH_ORDER = ["animedepo", "animecix", "openani", "anizle", "animely"]
+SEARCH_ORDER = ["animedepo", "animecix", "openani", "anizle"]
 
 def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tuple[str, str]]:
     import re

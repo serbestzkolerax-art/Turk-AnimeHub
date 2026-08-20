@@ -182,7 +182,7 @@ def get_anime_list(use_cache: bool = True) -> List[dict]:
         except Exception:
             continue
     
-    print("[Animely] Anime listesi alınamadı")
+
     return []
 
 def search_anime(query: str) -> List[AnimelyAnime]:
