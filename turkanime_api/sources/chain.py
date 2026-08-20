@@ -7,33 +7,37 @@ from . import PROVIDERS, get_provider_by_priority
 SEARCH_ORDER = ["animedepo", "animecix", "openani", "anizle", "animely"]
 
 def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tuple[str, str]]:
+    import re
     import difflib
     import concurrent.futures
-    
-    def is_good_match(title):
-        q = query.lower().strip()
-        t = title.lower().strip()
+    def _score(title):
+        q = re.sub(r'[^\w\s]', '', query.lower().strip())
+        t = re.sub(r'[^\w\s]', '', title.lower().strip())
+        q_words = q.split()
+        t_words = set(t.split())
+        s = 0.0
+        if all(w in t_words for w in q_words):
+            s += 1.0
         if q in t or t in q:
-            return True
-        sim = difflib.SequenceMatcher(None, q, t).ratio()
-        return sim > 0.7
-        
+            s += 0.5
+        s += difflib.SequenceMatcher(None, q, t).ratio()
+        return s
+
+    def is_good_match(title):
+        score = _score(title)
+        return score > 0.7
+
     def sort_key(item):
         prefix_slug, title = item
-        q = query.lower().strip()
-        t = title.lower().strip()
-        sim = difflib.SequenceMatcher(None, q, t).ratio()
-        if q in t or t in q:
-            sim += 0.5
-        return sim
+        return _score(title)
 
     def _do_search(name):
         try:
             if name == "animedepo":
-                return name, animedepo.search_animedepo(query, limit=limit)
+                return name, animedepo.search_animedepo(query, limit=50)
             elif name == "animecix":
                 from turkanime_api.animecix import Anime as LocalAnime
-                return name, LocalAnime.arama_yap(query)[:limit]
+                return name, LocalAnime.arama_yap(query)[:50]
             elif name == "anizle":
                 return name, anizle.search_anizle(query)[:limit]
             elif name == "animely":
