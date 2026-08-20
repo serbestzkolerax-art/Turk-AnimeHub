@@ -487,7 +487,9 @@ def _merge_all_episodes_for_title(title):
         try:
             results = animecix.Anime.arama_yap(title)
             for slug, res_title in results:
-                if _is_title_match(res_title, title):
+                q = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower().strip())
+                s_clean = str(slug).split(':', 1)[-1].replace('-', ' ').lower().strip()
+                if _is_title_match(res_title, title) or q == s_clean or q in s_clean:
                     anime = animecix.Anime(slug=slug)
                     return anime.get_bolum_listesi() or []
         except Exception:
@@ -508,7 +510,9 @@ def _merge_all_episodes_for_title(title):
             live_results = live_chain.search_all(title, limit=3, skip_depo=True)
             eps_to_return = []
             for slug, res_title in live_results:
-                if _is_title_match(res_title, title):
+                q = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower().strip())
+                s_clean = str(slug).split(':', 1)[-1].replace('-', ' ').lower().strip()
+                if _is_title_match(res_title, title) or q == s_clean or q in s_clean:
                     prov = slug.split(':')[0]
                     if prov.lower() == 'animecix': continue
                     from turkanime_api.sources import anizle, openani, animely
@@ -519,8 +523,10 @@ def _merge_all_episodes_for_title(title):
                         if peps:
                             for ep_slug, ep_t in peps:
                                 eps_to_return.append((f"{prov}:{slug.split(':',1)[1]}::{ep_slug}", ep_t))
-                            break
-            return eps_to_return
+                            # Removed break to allow merging multiple live providers
+            
+            # Sort so that openani/animely are processed first (since all_eps uses 'not in' rather than overwriting)
+            return sorted(eps_to_return, key=lambda x: 1 if x[0].startswith('anizle') else 0)
         except Exception:
             return []
 
@@ -539,6 +545,7 @@ def _merge_all_episodes_for_title(title):
             depo_limits[sn] = max(depo_limits.get(sn, 0.0), en)
             all_eps[(sn, en)] = (ep_slug, ep_title)
             
+        
         for eps, is_cix in [(local_eps, True), (live_eps, False)]:
             for ep_slug, ep_title in eps:
                 sn, en = parse_sn_en(ep_slug, ep_title)

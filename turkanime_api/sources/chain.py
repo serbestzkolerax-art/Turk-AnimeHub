@@ -23,7 +23,11 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
         s += difflib.SequenceMatcher(None, q, t).ratio()
         return s
 
-    def is_good_match(title):
+    def is_good_match(slug, title):
+        q = re.sub(r'[^\w\s]', '', query.lower().strip())
+        s_clean = str(slug).replace('-', ' ').lower().strip()
+        if q == s_clean or q in s_clean:
+            return True
         score = _score(title)
         if score < 1.0:
             return score > 0.85
@@ -63,7 +67,7 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
         for future in concurrent.futures.as_completed(futures):
             name, items = future.result()
             for slug, title in items:
-                if is_good_match(title):
+                if is_good_match(slug, title):
                     norm = title.lower().strip()
                     if norm not in seen:
                         seen.add(norm)
@@ -85,7 +89,7 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
         for future in concurrent.futures.as_completed(futures):
             name, items = future.result()
             for slug, title in items:
-                if is_good_match(title):
+                if is_good_match(slug, title):
                     norm = title.lower().strip()
                     if norm not in seen:
                         seen.add(norm)
