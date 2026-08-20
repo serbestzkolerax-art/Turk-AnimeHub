@@ -1,4 +1,4 @@
-import sys, os, time, traceback, re, functools, requests
+﻿import sys, os, time, traceback, re, functools, requests
 import subprocess, zipfile, io
 from collections import OrderedDict
 from urllib.parse import quote
@@ -17,12 +17,12 @@ def _ensure_flaresolverr():
         exe_path = os.path.join(fs_dir, 'flaresolverr.exe')
 
         if not os.path.exists(exe_path):
-            print("[FlareSolverr] İndiriliyor (bu işlem bir kez yapılır, ~80MB)...")
+            print("[FlareSolverr] Ä°ndiriliyor (bu iÅŸlem bir kez yapÄ±lÄ±r, ~80MB)...")
             url = 'https://github.com/FlareSolverr/FlareSolverr/releases/download/v3.3.17/flaresolverr_windows_x64.zip'
             r = requests.get(url)
             with zipfile.ZipFile(io.BytesIO(r.content)) as z:
                 z.extractall(base_dir)
-            print("[FlareSolverr] İndirme ve çıkarma tamamlandı.")
+            print("[FlareSolverr] Ä°ndirme ve Ã§Ä±karma tamamlandÄ±.")
             time.sleep(2)
         
         try:
@@ -32,19 +32,19 @@ def _ensure_flaresolverr():
         except Exception:
             pass
 
-        print("[FlareSolverr] Arka planda başlatılıyor. Lütfen hazır olmasını bekleyin...")
+        print("[FlareSolverr] Arka planda baÅŸlatÄ±lÄ±yor. LÃ¼tfen hazÄ±r olmasÄ±nÄ± bekleyin...")
         subprocess.Popen([exe_path], cwd=fs_dir, creationflags=0x08000000)
         
         for _ in range(20):
             try:
                 r = requests.get('http://localhost:8191/', timeout=1)
                 if 'FlareSolverr' in r.text:
-                    print("[FlareSolverr] Başarıyla başlatıldı ve istekleri kabul etmeye hazır!")
+                    print("[FlareSolverr] BaÅŸarÄ±yla baÅŸlatÄ±ldÄ± ve istekleri kabul etmeye hazÄ±r!")
                     break
             except Exception:
                 time.sleep(1)
     except Exception as e:
-        print(f"[FlareSolverr] Otomatik başlatma başarısız: {e}")
+        print(f"[FlareSolverr] Otomatik baÅŸlatma baÅŸarÄ±sÄ±z: {e}")
 
 if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
     _ensure_flaresolverr()
@@ -96,8 +96,8 @@ def clean_ep_title(ep_title, anime_title):
     # 1. Simple replace first
     cleaned = ep_title.replace(anime_title, '').strip()
     
-    # 2. If the anime_title was "One Punch Man 3", and ep_title was "One Punch Man 3rd Season 1. Bölüm"
-    # it leaves "rd Season 1. Bölüm". Let's clean up orphaned suffixes.
+    # 2. If the anime_title was "One Punch Man 3", and ep_title was "One Punch Man 3rd Season 1. BÃ¶lÃ¼m"
+    # it leaves "rd Season 1. BÃ¶lÃ¼m". Let's clean up orphaned suffixes.
     cleaned = re.sub(r'^(rd|nd|st|th)?\s*[Ss]eason\s*', '', cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r'^-\s*', '', cleaned).strip()
     
@@ -127,6 +127,7 @@ def fetch_media(search_title=None, media_id=None):
               id
               title { romaji english }
               format
+              type
               coverImage { large }
             }
           }
@@ -160,7 +161,7 @@ def fetch_media(search_title=None, media_id=None):
 def get_anilist_cover(title):
     if not title or title.lower() == "none":
         return DEFAULT_COVER
-    clean = re.sub(r'-(izle|bolum|bölüm|\d+.*)', '', str(title), flags=re.IGNORECASE).strip()
+    clean = re.sub(r'-(izle|bolum|bÃ¶lÃ¼m|\d+.*)', '', str(title), flags=re.IGNORECASE).strip()
     clean = re.sub(r'[^\w\s]', ' ', clean).strip()
     if not clean: clean = str(title)
     
@@ -306,7 +307,7 @@ def _extract_seasons(episodes):
         # Check if OVA or Special
         if 'ova' in str(title).lower() or 'ova' in str(slug).lower():
             season = 'OVA'
-        elif 'special' in str(title).lower() or 'özel' in str(title).lower() or 'special' in str(slug).lower():
+        elif 'special' in str(title).lower() or 'Ã¶zel' in str(title).lower() or 'special' in str(slug).lower():
             season = 'Special'
         elif cix_match:
             season = int(cix_match.group(1))
@@ -328,7 +329,7 @@ def _extract_seasons(episodes):
 
 def _normalize_slug_from_title(title):
     slug = title.lower()
-    for tr, eng in zip("çğıöşü", "cgiosu"):
+    for tr, eng in zip("Ã§ÄŸÄ±Ã¶ÅŸÃ¼", "cgiosu"):
         slug = slug.replace(tr, eng)
     slug = re.sub(r'[^a-z0-9]+', '-', slug)
     return slug.strip('-')
@@ -432,9 +433,11 @@ def _merge_all_episodes_for_title(title):
                 sn, en = parse_sn_en(ep_slug, ep_title)
                 
                 # ENFORCE ANIMEDEPO STRUCTURE:
-                # If animedepo has this season, do NOT allow episodes that exceed its max episode!
-                if depo_limits and sn in depo_limits and en > depo_limits[sn]:
-                    continue
+                if depo_limits:
+                    if sn not in depo_limits:
+                        continue
+                    if en > depo_limits[sn]:
+                        continue
                     
                 original_en = en
                 if original_en == 0.0:
@@ -498,7 +501,7 @@ def get_anime_detail(slug):
                     def __init__(self, slug, title, poster, summary):
                         self.slug = slug
                         self.title = title
-                        self.info = {"Özet": summary, "Resim": poster}
+                        self.info = {"Ã–zet": summary, "Resim": poster}
                 anime = LiveAnime(slug, title, details.get("poster", ""), details.get("summary", ""))
                 live_episodes = details.get("episodes", [])
         except Exception as e:
@@ -527,7 +530,7 @@ def get_anime_detail(slug):
             def __init__(self, slug, title):
                 self.slug = slug
                 self.title = title
-                self.info = {"Özet": "Bu anime için detay bulunamadı.", "Resim": ""}
+                self.info = {"Ã–zet": "Bu anime iÃ§in detay bulunamadÄ±.", "Resim": ""}
         anime = DummyAnime(slug, title)
         return anime, [], {}, "dummy"
 
@@ -614,7 +617,7 @@ def save_watchlist(data):
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-# ---- Bağlantılı Seriler API'si ----
+# ---- BaÄŸlantÄ±lÄ± Seriler API'si ----
 # AniList GraphQL cache to avoid 429 Too Many Requests
 _anilist_cache = {}
 
@@ -631,7 +634,7 @@ def api_related():
             t = node.get('title', {})
             return t.get('romaji') or t.get('english') or 'Unknown'
 
-        # 1. Kök animeyi bul
+        # 1. KÃ¶k animeyi bul
         current_media = fetch_media(search_title=title)
         if not current_media: return jsonify([])
         
@@ -645,7 +648,7 @@ def api_related():
             else:
                 break
                 
-        # 2. Devam serilerini aşağı doğru tara
+        # 2. Devam serilerini aÅŸaÄŸÄ± doÄŸru tara
         timeline = []
         current_node = current_media
         for _ in range(6):
@@ -660,7 +663,7 @@ def api_related():
             
             edges = current_node.get('relations', {}).get('edges', [])
             
-            # Yan hikayeleri / OVA'ları ekle
+            # Yan hikayeleri / OVA'larÄ± ekle
             for e in edges:
                 if e['relationType'] in ['SIDE_STORY', 'OVA', 'SPIN_OFF'] and e['node']['type'] == 'ANIME':
                     fmt = e['node'].get('format', 'OVA')
@@ -670,14 +673,14 @@ def api_related():
                         'is_main': False
                     })
                     
-            # Sonraki devam serisine geç
+            # Sonraki devam serisine geÃ§
             sequel_edge = next((e for e in edges if e['relationType'] == 'SEQUEL' and e['node']['type'] == 'ANIME'), None)
             if sequel_edge:
                 current_node = fetch_media(media_id=sequel_edge['node']['id'])
             else:
                 break
 
-        # 3. AnimeDepo ile eşleştir
+        # 3. AnimeDepo ile eÅŸleÅŸtir
         final_list = []
         for item in timeline:
             rel_title = item['title']
@@ -692,7 +695,7 @@ def api_related():
                     break
                     
             if found_slug:
-                # Yan hikaye ana anime ile aynıysa kopyaları önlemek için
+                # Yan hikaye ana anime ile aynÄ±ysa kopyalarÄ± Ã¶nlemek iÃ§in
                 if not any(x['slug'] == found_slug for x in final_list):
                     final_list.append({
                         "relation": item['relation'],
@@ -760,7 +763,7 @@ def index():
     slug = request.args.get("slug")
     if slug:
         anime, eps, seasons, src = get_anime_detail(slug)
-        if not anime: return "<pre>Anime bulunamadı</pre>", 404
+        if not anime: return "<pre>Anime bulunamadÄ±</pre>", 404
         total_episodes = sum(len(v) for v in seasons.values()) if seasons else len(eps)
         wl = load_watchlist()
         in_watchlist = any(item['slug'] == slug for item in wl)
@@ -863,8 +866,8 @@ def build_bolum(slug, ep_slug):
             ep_t = request.args.get("title", "") or ep_slug
             if title:
                 target_num = None
-                am = re.search(r'(\d+)\s*\.?\s*[Bb]lǬm', ep_t)
-                if not am: am = re.search(r'[Bb]lǬm\s*(\d+)', ep_t)
+                am = re.search(r'(\d+)\s*\.?\s*[Bb]lÇ¬m', ep_t)
+                if not am: am = re.search(r'[Bb]lÇ¬m\s*(\d+)', ep_t)
                 if not am:
                     anums = re.findall(r'(\d+)', ep_t)
                     if anums: target_num = int(anums[-1])
@@ -913,7 +916,7 @@ def build_bolum(slug, ep_slug):
     except Exception as e:
         print(f"[build_bolum] Local fallback error: {e}")
 
-    return None, "Hiçbir sağlayıcıdan video bulunamadı."
+    return None, "HiÃ§bir saÄŸlayÄ±cÄ±dan video bulunamadÄ±."
 
 def pick_video(bolum, requested_player=None, requested_fansub=None):
     vids = [v for v in bolum._videos if v.is_supported]
@@ -928,7 +931,7 @@ def pick_video(bolum, requested_player=None, requested_fansub=None):
         try:
             if v.is_working: return v, None
         except Exception: continue
-    return None, "Çalışan video bulunamadı."
+    return None, "Ã‡alÄ±ÅŸan video bulunamadÄ±."
 
 def resolve_stream(vid):
     candidate = vid.url
@@ -957,7 +960,7 @@ def watch():
     else:
         for v in bolum._videos:
             if not v.is_supported: continue
-            fs = getattr(v, 'fansub', '') or 'Varsayılan'
+            fs = getattr(v, 'fansub', '') or 'VarsayÄ±lan'
             if fs not in grouped_videos:
                 grouped_videos[fs] = OrderedDict()
             if v.player not in grouped_videos[fs]:
@@ -968,11 +971,11 @@ def watch():
             player_error = pick_err
         else:
             player_name = vid.player
-            fansub_name = getattr(vid, 'fansub', '') or 'Varsayılan'
+            fansub_name = getattr(vid, 'fansub', '') or 'VarsayÄ±lan'
             try:
                 stream_url, stream_kind = resolve_stream(vid)
                 if not stream_url:
-                    player_error = "Stream çözülemedi."
+                    player_error = "Stream Ã§Ã¶zÃ¼lemedi."
             except Exception:
                 player_error = traceback.format_exc()
 
@@ -1017,7 +1020,7 @@ def update_catalog():
         msg = animecix.trigger_manual_update()
         return f"<pre>{msg}</pre><p><a href='/'>Ana Sayfa</a></p>"
     except Exception as e:
-        return f"<pre>Güncelleme başlatılamadı: {e}</pre>"
+        return f"<pre>GÃ¼ncelleme baÅŸlatÄ±lamadÄ±: {e}</pre>"
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
