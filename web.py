@@ -661,10 +661,11 @@ def get_anime_detail(slug):
     if not title:
         title = slug.replace("-", " ").title()
 
-    if live_episodes:
+    merged_eps = _merge_all_episodes_for_title(title)
+    
+    # If the magical merge failed for some reason, fallback to the provider's direct list
+    if not merged_eps and live_episodes:
         merged_eps = live_episodes
-    else:
-        merged_eps = _merge_all_episodes_for_title(title)
 
     seasons = _extract_seasons(merged_eps) if merged_eps else {}
 
