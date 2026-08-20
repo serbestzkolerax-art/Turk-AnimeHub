@@ -24,15 +24,13 @@ from urllib.parse import urlparse
 
 # CF Bypass modülünü içe aktar
 try:
-    from turkanime_api.common.cf_bypass import (
-        CFSession, CFBypassError, get_cf_session,
-        ENGEL_DURUMLARI, CHALLENGE_MARKERS,
-    )
+    from turkanime_api.bypass import CFSession
     HAS_CF_BYPASS = True
 except ImportError:
     HAS_CF_BYPASS = False
-    ENGEL_DURUMLARI = frozenset({403, 429, 503})
-    CHALLENGE_MARKERS = ("Just a moment", "Checking your browser", "challenge-platform")
+    
+ENGEL_DURUMLARI = frozenset({403, 429, 503})
+CHALLENGE_MARKERS = ("Just a moment", "Checking your browser", "challenge-platform")
 
 import requests
 
@@ -799,9 +797,8 @@ def _extract_hls_stream(page_html: str, origin: str, player_page_url: str,
 
     body = "" if resp is None else (resp.text or "")
     if resp is None or resp.status_code != 200 or not body.lstrip().startswith("#EXTM3U"):
-        print("[Anizle] Yeni video.js player'ı bulundu ama stream korumalı "
-              f"({'yanıt yok' if resp is None else resp.status_code}); atlanıyor.")
-        return None
+        print("[Anizle] Yeni video.js player iframe fallback.")
+        return {"url": player_page_url, "label": label, "type": "iframe", "referer": player_page_url}
 
     return {"url": url, "label": label, "type": "hls", "referer": player_page_url}
 
