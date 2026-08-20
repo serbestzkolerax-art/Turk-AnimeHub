@@ -16,23 +16,32 @@
 {% if stream_url %}
     <div class="w-full aspect-video bg-black relative group">
         {% if stream_kind == "video" %}
-            <video src="{{ stream_url }}" controls autoplay class="w-full h-full object-contain"></video>
+            <video src="{{ stream_url }}" controls autoplay class="w-full h-full object-contain" onerror="tryNextPlayer()"></video>
         {% elif stream_kind == "hls" %}
             <video id="player" controls autoplay class="w-full h-full object-contain"></video>
             <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
             <script>
                 var video = document.getElementById('player');
                 var src = {{ stream_url|tojson }};
+                video.onerror = tryNextPlayer;
                 if (video.canPlayType('application/vnd.apple.mpegurl')) {
                     video.src = src;
                 } else if (Hls.isSupported()) {
                     var hls = new Hls();
                     hls.loadSource(src);
                     hls.attachMedia(video);
+                    hls.on(Hls.Events.ERROR, function(e, data) {
+                        if (data.fatal) tryNextPlayer();
+                    });
                 }
             </script>
         {% else %}
-            <iframe src="{{ stream_url }}" class="w-full h-full" allowfullscreen frameborder="0"></iframe>
+            <iframe src="{{ stream_url }}" class="w-full h-full" allowfullscreen frameborder="0" id="video-iframe"></iframe>
+            <script>
+                if ("{{ stream_url }}".includes("anizle.co") || "{{ stream_url }}".includes("anizmplayer")) {
+                    setTimeout(tryNextPlayer, 1000);
+                }
+            </script>
         {% endif %}
         
         <div class="absolute bottom-[20%] right-4 z-50 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-auto">
@@ -67,8 +76,8 @@
                 <div class="flex flex-wrap gap-2">
                     {% for p_name, v in players.items() %}
                         <a href="/watch?slug={{ watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}&player={{ p_name|urlencode }}&fansub={{ (v.fansub or '')|urlencode }}" 
-                           class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm
-                           {% if p_name == current_player and fs == current_fansub %}bg-indigo-600 text-white shadow-indigo-500/20 border-indigo-500
+                           class="player-link px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm
+                           {% if p_name == current_player and fs == current_fansub %}current-player bg-indigo-600 text-white shadow-indigo-500/20 border-indigo-500
                            {% else %}bg-gray-800/80 text-gray-300 hover:bg-gray-700 hover:text-white border-gray-700{% endif %}">
                             {{ p_name }}
                         </a>
@@ -78,3 +87,25 @@
         {% endfor %}
     </div>
 {% endif %}
+
+<script>
+    window.tryNextPlayer = function() {
+        let links = Array.from(document.querySelectorAll('.player-link'));
+        let currentIdx = links.findIndex(a => a.classList.contains('current-player'));
+        if (currentIdx >= 0 && currentIdx + 1 < links.length) {
+            console.log("Auto-switching to next player...");
+            window.location.href = links[currentIdx + 1].href;
+        }
+    };
+    
+    // Auto-skip if video takes longer than 7 seconds to play
+    window.onload = function() {
+        setTimeout(function() {
+            let v = document.querySelector('video');
+            if (v && v.readyState < 3 && !v.paused) {
+                console.log("Video timeout. Auto-switching...");
+                tryNextPlayer();
+            }
+        }, 7000);
+    };
+</script>
