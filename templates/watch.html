@@ -82,7 +82,8 @@
                 {% for season_num, season_eps in seasons.items() %}
                     {% for ep_slug, ep_title in season_eps %}
                     {% set short_ep_title = ep_title | clean_ep_title(selected_anime.title if selected_anime else anime_title) %}
-                    <a href="/watch?slug={{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}" 
+                    {% set next_query = "&player=" ~ (current_player|urlencode) ~ "&fansub=" ~ ((current_fansub or '')|urlencode) if current_player else "" %}
+                    <a href="/watch?slug={{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}{{ next_query }}" 
                        class="episode-btn season-{{ season_num }} flex flex-col bg-[#1a1f2e] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500/50 rounded-xl p-3 transition-all duration-200 group" style="display: none;">
                         <span class="text-xs text-indigo-400 font-bold mb-1">{% if season_num == 'OVA' or season_num == 'Special' %}{{ season_num }}{% else %}{{ season_num }}. Sezon{% endif %}</span>
                         <span class="text-sm font-medium text-gray-200 group-hover:text-white line-clamp-1" title="{{ ep_title }}">{{ short_ep_title }}</span>
@@ -246,7 +247,7 @@
                         
                         card.innerHTML = `
                             <div class="w-16 shrink-0 relative border-r border-gray-800">
-                                <img src="/api/cover?title=${encodeURIComponent(item.title)}" alt="${item.title}" class="w-full h-full object-cover">
+                                <img src="${item.cover || `/api/cover?title=${encodeURIComponent(item.title)}`}" alt="${item.title}" class="w-full h-full object-cover">
                             </div>
                             <div class="p-2.5 flex flex-col justify-center">
                                 <span class="text-[10px] font-bold text-indigo-400 mb-0.5 uppercase tracking-wide">${item.relation}</span>
