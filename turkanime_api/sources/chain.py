@@ -4,7 +4,7 @@ from . import anizle, openani, animecix, animedepo, tranimaci, animely
 from . import PROVIDERS, get_provider_by_priority
 
 # All live providers ( re‑enabled) + AnimeDepo + Tranimaci + Anizle
-SEARCH_ORDER = ["animedepo", "animecix", "openani", "anizle"]
+SEARCH_ORDER = ["animecix", "animedepo", "openani", "anizle"]
 
 def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tuple[str, str]]:
     import re
@@ -69,7 +69,7 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
     # PHASE 1: Fast local/direct sources
     fast_sources = ["animecix"]
     if not skip_depo:
-        fast_sources.insert(0, "animedepo")
+        fast_sources.append("animedepo") # Put animedepo AFTER animecix!
         
     phase1_results = []
     seen = set()

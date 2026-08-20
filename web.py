@@ -699,12 +699,28 @@ def run_search(query):
     try:
         from turkanime_api.sources import chain as live_chain
         results = live_chain.search_all(query, limit=20)
+        
+        base_titles = []
         for slug, title in results:
-            # We want to deduplicate based on a normalized version of the title
+            # User specifically requested: "don show ona ova specials in search just show main show"
+            if re.search(r'(?i)\b(ova|ona|special|specials|season\s*\d+|\d+(st|nd|rd|th)?\s*season|part\s*\d+|movie)\b', title):
+                continue
+                
+            # Filter out AnimeDepo split seasons (e.g. "One Punch Man 3" or "One Punch Man: Road to Hero")
+            # If the base title ("One Punch Man") is already found, we skip these suffixes.
+            is_suffix = False
+            for bt in base_titles:
+                if title.lower().startswith(bt.lower()) and len(title) > len(bt):
+                    is_suffix = True
+                    break
+            if is_suffix:
+                continue
+                
             normalized = re.sub(r'[^a-z0-9]', '', title.lower())
             if title and normalized not in seen_titles:
                 local.append((slug, title))
                 seen_titles.add(normalized)
+                base_titles.append(title)
     except Exception as e:
         print(f"[run_search] Error: {e}")
 
