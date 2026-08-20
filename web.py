@@ -153,12 +153,23 @@ def fetch_media(search_title=None, media_id=None):
         
         # Fallback logic for long/mismatched titles
         if not data and search_title:
-            if ':' in search_title:
-                data = _do_req(search_title.split(':')[0].strip())
+            # 1. Remove common suffixes
+            import re
+            cleaned = re.sub(r'(?i)\b(TV|OVA|ONA|Special|Specials|Movie|Season \d+|Part \d+)\b.*', '', search_title).strip()
+            if cleaned and cleaned != search_title:
+                data = _do_req(cleaned)
+                
+            # 2. Try first 4 words
             if not data:
                 words = search_title.split()
                 if len(words) > 4:
                     data = _do_req(' '.join(words[:4]))
+                    
+            # 3. Only split by colon if the prefix is reasonably long to avoid false positives (like "Magi:")
+            if not data and ':' in search_title:
+                prefix = search_title.split(':')[0].strip()
+                if len(prefix) > 5:
+                    data = _do_req(prefix)
 
         if data:
             _anilist_cache[cache_key] = data

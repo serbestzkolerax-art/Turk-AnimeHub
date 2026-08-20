@@ -23,9 +23,9 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                     Ana Sayfaya Dön
                 </a>
-                <button onclick="toggleWatchlist('{{ selected_anime.slug }}', '{{ selected_anime.title|replace("'", "\\'") }}')" id="watchlist-btn" class="inline-flex items-center text-sm font-semibold text-gray-300 hover:text-white transition gap-1 mb-2 ml-2 bg-black/30 px-3 py-1 rounded-full backdrop-blur-md w-fit border border-white/5">
-                    <svg class="w-4 h-4" id="watchlist-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
-                    <span id="watchlist-text">Listeye Ekle</span>
+                <button onclick="toggleWatchlist('{{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}', '{{ (selected_anime.title if selected_anime.title is defined else anime_title)|replace("'", "\\'") }}')" id="watchlist-btn" class="inline-flex items-center text-sm font-semibold text-gray-300 hover:text-white transition gap-1 mb-2 ml-2 bg-black/30 px-3 py-1 rounded-full backdrop-blur-md w-fit border border-white/5">
+                    <svg class="w-4 h-4 {% if in_watchlist %}text-indigo-400{% endif %}" id="watchlist-icon" fill="{% if in_watchlist %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+                    <span id="watchlist-text">{% if in_watchlist %}Listemde{% else %}Listeye Ekle{% endif %}</span>
                 </button>
 
                 <h1 class="text-3xl sm:text-4xl md:text-5xl font-black text-white drop-shadow-lg mb-2">{{ selected_anime.title }}</h1>
@@ -65,14 +65,14 @@
         {% endif %}
 
 
-        <div class="flex flex-col xl:flex-row gap-6">
+        <div class="flex flex-col lg:flex-row gap-6">
             <!-- Episodes Area -->
-            <div class="bg-cardbg rounded-xl shadow-lg border border-gray-800/50 overflow-hidden flex flex-col h-[600px] xl:w-2/3">
+            <div class="bg-cardbg rounded-xl shadow-lg border border-gray-800/50 overflow-hidden flex flex-col h-[600px] lg:w-2/3">
 
             <div class="border-b border-gray-800/80 bg-darker/50 p-2 overflow-x-auto flex gap-2 hide-scrollbar">
-                {% for season_num, season_eps in seasons.items()|sort %}
+                {% for season_num, season_eps in seasons.items() %}
                 <button onclick="showSeason('{{ season_num }}')" class="season-tab whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold text-gray-400 hover:text-gray-100 hover:bg-gray-800/50 transition-colors" data-season="{{ season_num }}">
-                    {{ season_num }}. Sezon
+                    {% if season_num == 'OVA' or season_num == 'Special' %}{{ season_num }}{% else %}{{ season_num }}. Sezon{% endif %}
                 </button>
                 {% endfor %}
             </div>
@@ -81,10 +81,11 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {% for season_num, season_eps in seasons.items() %}
                     {% for ep_slug, ep_title in season_eps %}
+                    {% set short_ep_title = ep_title | clean_ep_title(selected_anime.title if selected_anime else anime_title) %}
                     <a href="/watch?slug={{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}&ep={{ ep_slug }}&title={{ ep_title|urlencode }}" 
                        class="episode-btn season-{{ season_num }} flex flex-col bg-[#1a1f2e] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500/50 rounded-xl p-3 transition-all duration-200 group" style="display: none;">
-                        <span class="text-xs text-indigo-400 font-bold mb-1">{{ season_num }}. Sezon</span>
-                        <span class="text-sm font-medium text-gray-200 group-hover:text-white line-clamp-1" title="{{ ep_title }}">{{ ep_title }}</span>
+                        <span class="text-xs text-indigo-400 font-bold mb-1">{% if season_num == 'OVA' or season_num == 'Special' %}{{ season_num }}{% else %}{{ season_num }}. Sezon{% endif %}</span>
+                        <span class="text-sm font-medium text-gray-200 group-hover:text-white line-clamp-1" title="{{ ep_title }}">{{ short_ep_title }}</span>
                     </a>
                     {% endfor %}
                 {% endfor %}
@@ -93,7 +94,7 @@
             </div>
             
             <!-- Right Sidebar: Franchise Timeline -->
-            <div id="related-section" class="bg-cardbg rounded-xl shadow-lg border border-gray-800/50 p-5 xl:w-1/3 flex flex-col hidden h-[600px]">
+            <div id="related-section" class="bg-cardbg rounded-xl shadow-lg border border-gray-800/50 p-5 lg:w-1/3 flex flex-col hidden h-[600px]">
                 <h3 class="text-gray-400 text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2 border-b border-gray-800/80 pb-3">
                     <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
                     Kronolojik Sıralama
@@ -135,47 +136,48 @@
 
     // Watchlist Logic
     window.currentAnimeSlug = "{{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}";
-    function toggleWatchlist(slug, title) {
-        let list = JSON.parse(localStorage.getItem('animehub_watchlist') || '[]');
-        const index = list.findIndex(item => item.slug === slug);
+    async function toggleWatchlist(slug, title) {
         const icon = document.getElementById('watchlist-icon');
         const text = document.getElementById('watchlist-text');
         
-        if (index > -1) {
-            list.splice(index, 1);
-            if (icon) {
-                icon.setAttribute('fill', 'none');
-                icon.classList.remove('text-indigo-400');
-            }
-            if (text) text.innerText = 'Listeye Ekle';
-        } else {
-            list.unshift({slug: slug, title: title, time: Date.now()});
-            if (icon) {
-                icon.setAttribute('fill', 'currentColor');
-                icon.classList.add('text-indigo-400');
-            }
-            if (text) text.innerText = 'Listemde';
-        }
-        localStorage.setItem('animehub_watchlist', JSON.stringify(list));
-    }
-
-    function checkWatchlistStatus() {
-        const slug = '{{ selected_anime.slug if selected_anime.slug is defined else watch_slug }}';
-        let list = JSON.parse(localStorage.getItem('animehub_watchlist') || '[]');
-        if (list.some(item => item.slug === slug)) {
-            const icon = document.getElementById('watchlist-icon');
-            if(icon) {
-                icon.setAttribute('fill', 'currentColor');
-                icon.classList.add('text-indigo-400');
-                const text = document.getElementById('watchlist-text');
+        const isCurrentlyInWatchlist = text.innerText === 'Listemde';
+        
+        try {
+            if (isCurrentlyInWatchlist) {
+                // Remove
+                await fetch('/api/watchlist', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slug: slug })
+                });
+                
+                if (icon) {
+                    icon.setAttribute('fill', 'none');
+                    icon.classList.remove('text-indigo-400');
+                }
+                if (text) text.innerText = 'Listeye Ekle';
+            } else {
+                // Add
+                await fetch('/api/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slug: slug, title: title })
+                });
+                
+                if (icon) {
+                    icon.setAttribute('fill', 'currentColor');
+                    icon.classList.add('text-indigo-400');
+                }
                 if (text) text.innerText = 'Listemde';
             }
+        } catch(e) {
+            console.error("Watchlist toggle failed", e);
         }
     }
 
     // Fetch MAL Score dynamically
     async function fetchMalScore() {
-        const title = '{{ selected_anime.title|replace("\'", "\\\'") }}'.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        const title = {{ (selected_anime.title if selected_anime.title is defined else anime_title)|tojson }};
         const query = `
         query ($search: String) {
           Media(search: $search, type: ANIME) {
@@ -211,15 +213,13 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        checkWatchlistStatus();
         fetchMalScore();
         fetchRelatedEntries();
     });
 
 
-    // Fetch and render Related Entries
     async function fetchRelatedEntries() {
-        const title = '{{ selected_anime.title|replace("'", "\'") }}'.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        const title = {{ (selected_anime.title if selected_anime.title is defined else anime_title)|tojson }};
         try {
             const res = await fetch(`/api/related?title=${encodeURIComponent(title)}`);
             if (res.ok) {
@@ -230,10 +230,19 @@
                     section.classList.remove('hidden');
                     
                     list.forEach(item => {
-                        const url = `/watch?slug=${item.slug}`;
-                        const card = document.createElement('a');
-                        card.href = url;
-                        card.className = "flex bg-[#1a1f2e] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500/50 rounded-xl overflow-hidden transition-all duration-200 group";
+                        const isMissing = !item.slug;
+                        const card = document.createElement(isMissing ? 'div' : 'a');
+                        if (!isMissing) {
+                            card.href = `/watch?slug=${item.slug}`;
+                        }
+                        
+                        let baseClasses = "flex border rounded-xl overflow-hidden transition-all duration-200 group ";
+                        if (isMissing) {
+                            baseClasses += "bg-gray-900/50 border-gray-800/30 opacity-60 cursor-not-allowed";
+                        } else {
+                            baseClasses += "bg-[#1a1f2e] hover:bg-indigo-600/20 border-gray-800 hover:border-indigo-500/50";
+                        }
+                        card.className = baseClasses;
                         
                         card.innerHTML = `
                             <div class="w-16 shrink-0 relative border-r border-gray-800">
@@ -241,7 +250,7 @@
                             </div>
                             <div class="p-2.5 flex flex-col justify-center">
                                 <span class="text-[10px] font-bold text-indigo-400 mb-0.5 uppercase tracking-wide">${item.relation}</span>
-                                <h3 class="text-xs font-bold text-gray-200 group-hover:text-white line-clamp-2 leading-tight">${item.title}</h3>
+                                <h3 class="text-xs font-bold text-gray-200 line-clamp-2 leading-tight ${isMissing ? '' : 'group-hover:text-white'}">${item.title}</h3>
                             </div>
                         `;
                         container.appendChild(card);
