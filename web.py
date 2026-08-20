@@ -1,4 +1,4 @@
-﻿import sys, os, time, traceback, re, functools, requests
+import sys, os, time, traceback, re, functools, requests
 import subprocess, zipfile, io
 from collections import OrderedDict
 from urllib.parse import quote
@@ -517,6 +517,18 @@ def get_anime_detail(slug):
                 anime = test_anime
                 title = anime.title
                 source = "animecix"
+                
+                # Enhance metadata using AniList if missing
+                if not anime.info.get("Resim") and title:
+                    try:
+                        ani_info = fetch_media(search_title=title)
+                        if ani_info:
+                            if ani_info.get("coverImage", {}).get("large"):
+                                anime.info["Resim"] = ani_info["coverImage"]["large"]
+                            if ani_info.get("description"):
+                                anime.info["Özet"] = ani_info["description"]
+                    except Exception as e:
+                        print(f"Error fetching enhanced metadata for ecchi: {e}")
         except Exception:
             pass
 

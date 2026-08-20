@@ -10,67 +10,83 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
     import difflib
     import concurrent.futures
     
-    if not skip_depo:
-        # First, only search animedepo to make it fast
-        try:
-            depo_results = animedepo.search_animedepo(query, limit=limit)
-        except Exception as e:
-            print(f"[chain] search error for animedepo: {e}")
-            depo_results = []
-            
-        if depo_results:
-            # Sort animedepo results by similarity
-            def sort_key(item):
-                slug, title = item
-                sim = difflib.SequenceMatcher(None, query.lower(), title.lower()).ratio()
-                if query.lower() in title.lower() or title.lower() in query.lower():
-                    sim += 0.5
-                return sim
-                
-            depo_results.sort(key=sort_key, reverse=True)
-            return [(f"animedepo:{slug}", title) for slug, title in depo_results[:limit]]
+    def is_good_match(title):
+        q = query.lower().strip()
+        t = title.lower().strip()
+        if q in t or t in q:
+            return True
+        sim = difflib.SequenceMatcher(None, q, t).ratio()
+        return sim > 0.7
         
-    # If animedepo has NO results, fallback to searching all other sources concurrently
-    results = []
-    seen = set()
+    def sort_key(item):
+        prefix_slug, title = item
+        q = query.lower().strip()
+        t = title.lower().strip()
+        sim = difflib.SequenceMatcher(None, q, t).ratio()
+        if q in t or t in q:
+            sim += 0.5
+        return sim
 
     def _do_search(name):
         try:
-            if name == "anizle":
+            if name == "animedepo":
+                return name, animedepo.search_animedepo(query, limit=limit)
+            elif name == "animecix":
+                from turkanime_api.animecix import Anime as LocalAnime
+                return name, LocalAnime.arama_yap(query)[:limit]
+            elif name == "anizle":
                 return name, anizle.search_anizle(query)[:limit]
             elif name == "animely":
                 return name, animely.search_animely(query, limit=limit)
             elif name == "openani":
                 return name, openani.search_openani(query, limit=limit)
-            elif name == "animecix":
-                return name, animecix.search_animecix(query)[:limit]
-            elif name == "tranimaci":
-                return name, tranimaci.search_tranimaci(query, limit=limit)
         except Exception as e:
             print(f"[chain] search error for {name}: {e}")
         return name, []
 
-    collected = []
-    other_sources = [s for s in SEARCH_ORDER if s != "animedepo"]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(other_sources)) as executor:
-        futures = {executor.submit(_do_search, name): name for name in other_sources}
+    # PHASE 1: Fast local/direct sources
+    fast_sources = ["animecix"]
+    if not skip_depo:
+        fast_sources.insert(0, "animedepo")
+        
+    phase1_results = []
+    seen = set()
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fast_sources)) as executor:
+        futures = {executor.submit(_do_search, name): name for name in fast_sources}
         for future in concurrent.futures.as_completed(futures):
             name, items = future.result()
             for slug, title in items:
-                full = f"{name}:{slug}"
-                if full not in seen:
-                    seen.add(full)
-                    collected.append((full, title, name))
-
-    def fallback_sort_key(item):
-        full_slug, title, source_name = item
-        sim = difflib.SequenceMatcher(None, query.lower(), title.lower()).ratio()
-        if query.lower() in title.lower() or title.lower() in query.lower():
-            sim += 0.5
-        return sim
-
-    collected.sort(key=fallback_sort_key, reverse=True)
-    return [(c[0], c[1]) for c in collected[:25]]
+                if is_good_match(title):
+                    norm = title.lower().strip()
+                    if norm not in seen:
+                        seen.add(norm)
+                        if str(slug).startswith("ecchi_"):
+                            phase1_results.append((slug, title))
+                        else:
+                            phase1_results.append((f"{name}:{slug}", title))
+                        
+    if phase1_results:
+        phase1_results.sort(key=sort_key, reverse=True)
+        return phase1_results[:limit]
+        
+    # PHASE 2: Slow live sources
+    live_sources = ["openani", "anizle", "animely"]
+    phase2_results = []
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(live_sources)) as executor:
+        futures = {executor.submit(_do_search, name): name for name in live_sources}
+        for future in concurrent.futures.as_completed(futures):
+            name, items = future.result()
+            for slug, title in items:
+                if is_good_match(title):
+                    norm = title.lower().strip()
+                    if norm not in seen:
+                        seen.add(norm)
+                        phase2_results.append((f"{name}:{slug}", title))
+                        
+    phase2_results.sort(key=sort_key, reverse=True)
+    return phase2_results[:limit]
 
 
 def get_anime_details(full_slug: str) -> Optional[Dict[str, Any]]:
