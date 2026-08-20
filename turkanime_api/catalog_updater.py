@@ -82,8 +82,13 @@ async def _fetch_search_recursive(site, query, session, anime_dict, lock, sem, c
                 await asyncio.sleep(1)
 
 async def _scrape_catalog(site):
-    chars = list(string.ascii_lowercase) + [str(i) for i in range(10)] + ['.', '-', ' ']
-    queries = [c1 + c2 for c1 in chars for c2 in chars]
+    import string
+    chars = list(string.ascii_lowercase) + [str(i) for i in range(10)] + list(string.punctuation) + [' ']
+    # User requested 1-character queries AND 2-character queries of EVERY available character
+    queries = [c for c in chars] + [c1 + c2 for c1 in chars for c2 in chars]
+    
+    # Remove duplicates just in case
+    queries = list(dict.fromkeys(queries))
 
     anime_dict = {}
     lock = asyncio.Lock()
