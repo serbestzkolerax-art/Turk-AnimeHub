@@ -135,28 +135,37 @@ def fetch_media(search_title=None, media_id=None):
       }
     }
     '''
-    vars = {}
-    if search_title: vars['search'] = search_title
-    if media_id: vars['id'] = media_id
-    
     import time
-    try:
+    
+    def _do_req(st=None, mid=None):
+        vars = {}
+        if st: vars['search'] = st
+        if mid: vars['id'] = mid
         res = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': vars}, timeout=5)
         if res.status_code == 429:
             time.sleep(1.5)
             res = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': vars}, timeout=5)
-            
         if not res.ok: return None
-        data = res.json().get('data', {}).get('Media')
+        return res.json().get('data', {}).get('Media')
+
+    try:
+        data = _do_req(search_title, media_id)
         
-        if data and len(_anilist_cache) > 200:
-            _anilist_cache.popitem(last=False)
+        # Fallback logic for long/mismatched titles
+        if not data and search_title:
+            if ':' in search_title:
+                data = _do_req(search_title.split(':')[0].strip())
+            if not data:
+                words = search_title.split()
+                if len(words) > 4:
+                    data = _do_req(' '.join(words[:4]))
+
         if data:
             _anilist_cache[cache_key] = data
-        return data
+            return data
     except Exception as e:
-        print(f"fetch_media error: {e}")
-        return None
+        print(f"AniList API error: {e}")
+    return None
 
 def get_anilist_cover(title):
     if not title or title.lower() == "none":
@@ -483,19 +492,20 @@ def get_anime_detail(slug):
                         details["title"] = title
                 
                 # Try to enhance metadata using AniList if title is just numbers or metadata is empty
-                if not details.get("poster") and title:
-                    # We can use fetch_media with the title!
-                    try:
-                        ani_info = fetch_media(search_title=title)
-                        if ani_info:
-                            details["poster"] = ani_info.get("coverImage", {}).get("large", "")
-                            details["summary"] = ani_info.get("description", "")
-                            # Use the canonical romaji title from AniList if it's better
-                            if title.isdigit() and ani_info.get("title", {}).get("romaji"):
-                                title = ani_info["title"]["romaji"]
-                                details["title"] = title
-                    except Exception as e:
-                        print(f"Error fetching enhanced metadata: {e}")
+                if not details.get("poster"):
+                    search_t = passed_title if passed_title else title
+                    if search_t:
+                        try:
+                            ani_info = fetch_media(search_title=search_t)
+                            if ani_info:
+                                details["poster"] = ani_info.get("coverImage", {}).get("large", "")
+                                details["summary"] = ani_info.get("description", "")
+                                # Use the canonical romaji title from AniList if it's better
+                                if title.isdigit() and ani_info.get("title", {}).get("romaji"):
+                                    title = ani_info["title"]["romaji"]
+                                    details["title"] = title
+                        except Exception as e:
+                            print(f"Error fetching enhanced metadata: {e}")
                 source = slug.split(":")[0]
                 class LiveAnime:
                     def __init__(self, slug, title, poster, summary):
