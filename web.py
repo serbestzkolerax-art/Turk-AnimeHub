@@ -366,7 +366,7 @@ def _is_title_match(t1, t2):
         # Remove ordinals from numbers (1st, 2nd, 3rd, 4th)
         t_str = re.sub(r'(?<=\d)(st|nd|rd|th)\b', '', t_str)
         # Strip structural keywords
-        t_str = re.sub(r'\b(season|part|tv)\b', '', t_str)
+        t_str = re.sub(r'\b(season|part|tv|movie\s*\d*|movie)\b', '', t_str)
         # Unify special/ona to ova so they match
         t_str = re.sub(r'\b(special|specials|ona)\b', 'ova', t_str)
         return re.sub(r'[^a-z0-9]', '', t_str)
