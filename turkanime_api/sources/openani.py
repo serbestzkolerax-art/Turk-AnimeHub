@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 # CF Bypass modülünü içe aktar
 try:
-    from turkanime_api.common.cf_bypass import CFSession, CFBypassError, get_cf_session
+    from turkanime_api.bypass import CFSession
     HAS_CF_BYPASS = True
 except ImportError:
     HAS_CF_BYPASS = False
@@ -518,7 +518,7 @@ class OpenAniAdapter:
                 files_match = re.search(r'files:(\[\{.*?\}\])', data_text)
                 if files_match:
                      files_str = files_match.group(1)
-                     vid_matches = re.finditer(r'resolution:(\d+),file:"([^"]+)"', files_str)
+                     vid_matches = re.finditer(r'resolution:(\d+).*?file:"([^"]+)"', files_str)
                      for v in vid_matches:
                          res = f"{v.group(1)}p"
                          url = v.group(2)

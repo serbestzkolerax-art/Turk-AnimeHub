@@ -964,8 +964,10 @@ def build_bolum(slug, ep_slug):
                                             break
                                 break
                 return bolum, None
-        except Exception as e:
-            return None, str(e)
+          else:
+              return None, "Video bulunamadi."
+      except Exception as e:
+          return None, str(e)
 
 
 
