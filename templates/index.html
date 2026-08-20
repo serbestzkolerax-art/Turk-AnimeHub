@@ -1,11 +1,11 @@
-{% extends "base.html" %}
+ï»¿{% extends "base.html" %}
 
 {% block content %}
     <!-- Watchlist Section -->
     <div id="watchlist-section" class="mb-12 hidden px-4 md:px-8">
         <div class="flex items-center justify-between mb-6">
             <h2 class="text-2xl font-bold text-gray-100 flex items-center gap-2 border-l-4 border-indigo-500 pl-3">
-                Ýzleme Listem
+                Ä°zleme Listem
             </h2>
             <button onclick="clearWatchlist()" class="text-sm text-gray-400 hover:text-red-400 transition-colors">Listeyi Temizle</button>
         </div>
@@ -17,9 +17,9 @@
 
 {% if results is not none %}
     <div class="px-4 md:px-8">
-        <h2 class="text-xl font-bold mb-6 text-gray-200 border-l-4 border-indigo-500 pl-3">Arama Sonuçlarý: "{{ query }}"</h2>
+        <h2 class="text-xl font-bold mb-6 text-gray-200 border-l-4 border-indigo-500 pl-3">Arama SonuÃ§larÄ±: "{{ query }}"</h2>
         {% if results|length == 0 %}
-            <div class="text-center py-12 text-gray-400">Sonuç bulunamadý.</div>
+            <div class="text-center py-12 text-gray-400">SonuÃ§ bulunamadÄ±.</div>
         {% else %}
             <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
             {% for a in results %}
@@ -58,12 +58,12 @@
             </div>
             <h1 class="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 shadow-sm text-white drop-shadow-lg">{{ hero[1] }}</h1>
             <p class="text-gray-300 text-sm md:text-base mb-6 line-clamp-3 drop-shadow-md">
-                AnimeciX tarzý yepyeni görünüm! En güncel bölümler ve en iyi kalitede Türkçe altyazýlý anime izleme keyfi. Hemen izlemeye baþla.
+                AnimeciX tarzÄ± yepyeni gÃ¶rÃ¼nÃ¼m! En gÃ¼ncel bÃ¶lÃ¼mler ve en iyi kalitede TÃ¼rkÃ§e altyazÄ±lÄ± anime izleme keyfi. Hemen izlemeye baÅŸla.
             </p>
             <div class="flex gap-4">
                 <a href="/?slug={{ hero[0] }}" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-bold transition-transform hover:scale-105 shadow-[0_0_15px_rgba(79,70,229,0.4)]">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6z"/></svg>
-                    Hemen Ýzle
+                    Hemen Ä°zle
                 </a>
                 <button onclick="addWatchlist('{{ hero[0] }}', '{{ hero[1] }}', '/api/cover?title={{ hero[1]|urlencode }}')" class="flex items-center gap-2 bg-[#202227] hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-bold transition-transform hover:scale-105">
                     Listeye Ekle
@@ -73,11 +73,11 @@
     </section>
 
     <main class="px-4 md:px-8">
-        <!-- Günün Animeleri / Popüler Animeler -->
+        <!-- GÃ¼nÃ¼n Animeleri / PopÃ¼ler Animeler -->
         <section class="mb-12">
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-2xl font-bold border-l-4 border-indigo-500 pl-3 text-white">Popüler Animeler</h2>
-                <a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Tümünü Gör</a>
+                <h2 class="text-2xl font-bold border-l-4 border-indigo-500 pl-3 text-white">PopÃ¼ler Animeler</h2>
+                <a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">TÃ¼mÃ¼nÃ¼ GÃ¶r</a>
             </div>
             
             <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
