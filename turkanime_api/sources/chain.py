@@ -11,8 +11,14 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
     import difflib
     import concurrent.futures
     def _score(title):
-        q = re.sub(r'[^\w\s]', '', query.lower().strip())
-        t = re.sub(r'[^\w\s]', '', title.lower().strip())
+        q_raw = re.sub(r'(?i)\b(special|specials|ona)\b', 'ova', query)
+        t_raw = re.sub(r'(?i)\b(special|specials|ona)\b', 'ova', title)
+        
+        q_raw = re.sub(r'(?i)\b\d+(st|nd|rd|th)?\s*season\b', lambda m: re.search(r'\d+', m.group()).group(), q_raw)
+        t_raw = re.sub(r'(?i)\b\d+(st|nd|rd|th)?\s*season\b', lambda m: re.search(r'\d+', m.group()).group(), t_raw)
+        
+        q = re.sub(r'[^\w\s]', '', q_raw.lower().strip())
+        t = re.sub(r'[^\w\s]', '', t_raw.lower().strip())
         q_words = q.split()
         t_words = set(t.split())
         s = 0.0
@@ -24,11 +30,17 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
         return s
 
     def is_good_match(slug, title):
-        q = re.sub(r'[^\w\s]', '', query.lower().strip())
-        s_clean = str(slug).replace('-', ' ').lower().strip()
+        q_raw = re.sub(r'(?i)\b(special|specials|ona)\b', 'ova', query)
+        q_raw = re.sub(r'(?i)\b\d+(st|nd|rd|th)?\s*season\b', lambda m: re.search(r'\d+', m.group()).group(), q_raw)
+        q = re.sub(r'[^\w\s]', '', q_raw.lower().strip())
+        
+        s_clean = re.sub(r'(?i)\b(special|specials|ona)\b', 'ova', str(slug)).replace('-', ' ').lower().strip()
+        s_clean = re.sub(r'(?i)\b\d+(st|nd|rd|th)?\s*season\b', lambda m: re.search(r'\d+', m.group()).group(), s_clean)
         if q == s_clean or q in s_clean:
             return True
         score = _score(title)
+        if title == 'One Punch Man Specials':
+            print(f"DEBUG score for {title}: {score}")
         if score < 1.0:
             return score > 0.85
         return True
