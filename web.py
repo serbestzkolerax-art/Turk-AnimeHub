@@ -159,11 +159,15 @@ def fetch_media(search_title=None, media_id=None):
             if cleaned and cleaned != search_title:
                 data = _do_req(cleaned)
                 
-            # 2. Try first 4 words
+            # 2. Try first 4, 3, or 2 words (gradual fallback to get franchise cover)
             if not data:
                 words = search_title.split()
                 if len(words) > 4:
                     data = _do_req(' '.join(words[:4]))
+                if not data and len(words) > 3:
+                    data = _do_req(' '.join(words[:3]))
+                if not data and len(words) > 2:
+                    data = _do_req(' '.join(words[:2]))
                     
             # 3. Only split by colon if the prefix is reasonably long to avoid false positives (like "Magi:")
             if not data and ':' in search_title:
@@ -669,7 +673,8 @@ def api_related():
             timeline.append({
                 'title': get_best_title(current_node),
                 'relation': 'TV Series' if current_node.get('format') == 'TV' else str(current_node.get('format')),
-                'is_main': True
+                'is_main': True,
+                'cover': current_node.get('coverImage', {}).get('large', '')
             })
             
             edges = current_node.get('relations', {}).get('edges', [])
@@ -681,7 +686,8 @@ def api_related():
                     timeline.append({
                         'title': get_best_title(e['node']),
                         'relation': f"{e['relationType'].replace('_', ' ').title()} ({fmt})",
-                        'is_main': False
+                        'is_main': False,
+                        'cover': e['node'].get('coverImage', {}).get('large', '')
                     })
                     
             # Sonraki devam serisine geÃ§
@@ -717,7 +723,8 @@ def api_related():
                 final_list.append({
                     "relation": item['relation'],
                     "title": found_title_matched,
-                    "slug": found_slug
+                    "slug": found_slug,
+                    "cover": item.get('cover')
                 })
                     
         return jsonify(final_list)
