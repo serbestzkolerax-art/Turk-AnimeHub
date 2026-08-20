@@ -765,8 +765,16 @@ def api_related():
             return t.get('romaji') or t.get('english') or 'Unknown'
 
         # 1. KÃ¶k animeyi bul
-        current_media = fetch_media(search_title=title)
-        if not current_media: return jsonify([])
+                # 1. Kk animeyi bul
+        # Often AnimeDepo has weird suffixes that Anilist doesn't have.
+        import re
+        search_t = re.sub(r'(?i)(Commemorative Special|Special|Specials|OVA|ONA)', '', title).strip()
+        current_media = fetch_media(search_title=search_t)
+        if not current_media: 
+            current_media = fetch_media(search_title=title)
+            
+        if not current_media: 
+            return jsonify([])
         
         for _ in range(4):
             prequel_edge = next((e for e in current_media.get('relations', {}).get('edges', []) 
@@ -840,6 +848,41 @@ def api_related():
                     "title": found_title_matched,
                     "slug": found_slug,
                     "cover": item.get('cover')
+                })
+                
+        # If the requested title (e.g. Commemorative Special) is missing from AniList's chronology, inject it!
+        found = False
+        for item in final_list:
+            if title.lower() == item['title'].lower():
+                found = True
+                break
+        
+        if not found:
+            import re
+            search_t = re.sub(r'(?i)(Commemorative Special|Special|Specials|OVA|ONA)', '', title).strip().lower()
+            injected = False
+            for i, item in enumerate(final_list):
+                if search_t in item['title'].lower() or item['title'].lower() in search_t:
+                    new_slug = None
+                    search_res = live_chain.search_all(title, limit=1)
+                    if search_res: new_slug = search_res[0][0]
+                    final_list.insert(i+1, {
+                        "title": title, 
+                        "relation": "OVA", 
+                        "slug": new_slug,
+                        "cover": item.get('cover')
+                    })
+                    injected = True
+                    break
+            if not injected:
+                new_slug = None
+                search_res = live_chain.search_all(title, limit=1)
+                if search_res: new_slug = search_res[0][0]
+                final_list.append({
+                    "title": title, 
+                    "relation": "OVA", 
+                    "slug": new_slug,
+                    "cover": None
                 })
                     
         return jsonify(final_list)
