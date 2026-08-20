@@ -14,8 +14,6 @@ _PRJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.path.join(_PRJ_ROOT, "anime data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
-ANIMECIX_ANIMES   = os.path.join(_DATA_DIR, "animes.json")
-ANIMECIX_EPISODES = os.path.join(_DATA_DIR, "episodes.json")
 ECCHICIX_ANIMES   = os.path.join(_DATA_DIR, "ecchicix_animes.json")
 ECCHICIX_EPISODES = os.path.join(_DATA_DIR, "ecchicix_episodes.json")
 
@@ -52,21 +50,50 @@ async def _fetch_search(site, query, session, anime_dict, lock, semaphore):
             except Exception:
                 await asyncio.sleep(0.5)
 
+async def _fetch_search_recursive(site, query, session, anime_dict, lock, sem, chars):
+    base = "https://ecchicix.com" if site == "ecchicix" else "https://animecix.tv"
+    url = f"{base}/secure/search/{query}?limit=500"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://ecchicix.com/",
+        "Accept": "application/json, text/plain, */*",
+        "x-e-h": "7Y2ozlO+QysR5w9Q6Tupmtvl9jJp7ThFH8SB+Lo7NvZjgjqRSqOgcT2v4ISM9sP10LmnlYI8WQ==.xrlyOBFS5BHjQ2Lk"
+    }
+    
+    async with sem:
+        for attempt in range(3):
+            try:
+                r = await session.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    data = r.json()
+                    results_list = data if isinstance(data, list) else data.get('results', [])
+                    async with lock:
+                        for item in results_list:
+                            anime_dict[str(item["id"])] = item
+                            
+                    if len(results_list) >= 500:
+                        print(f"  [{site}] Query '{query}' hit 500 limit! Digging deeper...")
+                        tasks = [_fetch_search_recursive(site, query + c, session, anime_dict, lock, sem, chars) for c in chars]
+                        await asyncio.gather(*tasks)
+                    return
+            except Exception as e:
+                # print(f"Error {e}")
+                await asyncio.sleep(1)
+
 async def _scrape_catalog(site):
-    chars = list(string.ascii_lowercase) + [str(i) for i in range(10)] + ['.', '-']
+    chars = list(string.ascii_lowercase) + [str(i) for i in range(10)] + ['.', '-', ' ']
     queries = [c1 + c2 for c1 in chars for c2 in chars]
 
     anime_dict = {}
     lock = asyncio.Lock()
-    sem = asyncio.Semaphore(50)
+    sem = asyncio.Semaphore(35) 
 
+    print(f"  [{site}] Starting deep recursive search algorithm...")
     async with AsyncSession(impersonate="chrome110") as session:
-        tasks = [_fetch_search(site, q, session, anime_dict, lock, sem) for q in queries]
-        total = len(tasks)
-        for i, t in enumerate(asyncio.as_completed(tasks), 1):
-            await t
-            if i % 300 == 0 or i == total:
-                print(f"  [{site}] {i}/{total} queries | {len(anime_dict)} unique", flush=True)
+        tasks = [_fetch_search_recursive(site, q, session, anime_dict, lock, sem, chars) for q in queries]
+        await asyncio.gather(*tasks)
+        print(f"  [{site}] Finished search. Found {len(anime_dict)} unique animes.")
 
     return sorted(anime_dict.values(), key=lambda x: x["id"])
 
@@ -198,11 +225,7 @@ async def _update_site(site, animes_path, episodes_path):
 async def run_full_update():
     success = True
     
-    animes_json = os.path.join(_DATA_DIR, "animes.json")
-    episodes_json = os.path.join(_DATA_DIR, "episodes.json")
-    
-    if not await _update_site("animecix", animes_json, episodes_json):
-        success = False
+    # User strictly requested ONLY ecchicix, so we drop animecix completely!
     if not await _update_site("ecchicix", ECCHICIX_ANIMES, ECCHICIX_EPISODES):
         success = False
 
