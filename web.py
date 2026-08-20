@@ -216,6 +216,29 @@ def fetch_media(search_title=None, media_id=None):
         print(f"AniList API error: {e}")
     return None
 
+_cover_cache = {}
+
+def search_mal_cover(title):
+    if title in _cover_cache: return _cover_cache[title]
+    
+    with _anilist_lock:
+        import urllib.parse
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        url = f'https://myanimelist.net/anime.php?q={urllib.parse.quote(title)}&cat=anime'
+        try:
+            r = requests.get(url, headers=headers, timeout=5)
+            if r.status_code == 429: time.sleep(1.5)
+            match = re.search(r'https://cdn\.myanimelist\.net/r/\d+x\d+/images/anime/\d+/\d+\.jpg', r.text)
+            if match:
+                url = match.group(0)
+                url = re.sub(r'r/\d+x\d+/', '', url)
+                _cover_cache[title] = url
+                return url
+        except Exception:
+            pass
+        _cover_cache[title] = None
+        return None
+
 def get_anilist_cover(title):
     if not title or title.lower() == "none":
         return DEFAULT_COVER
@@ -229,6 +252,11 @@ def get_anilist_cover(title):
             return data["coverImage"]["large"]
     except Exception: pass
     
+    # Fallback to MyAnimeList direct scraping if AniList completely failed
+    mal_cover = search_mal_cover(clean)
+    if mal_cover:
+        return mal_cover
+        
     return DEFAULT_COVER
 
 @app.route("/api/cover")
