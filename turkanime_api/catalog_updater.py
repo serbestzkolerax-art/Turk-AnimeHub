@@ -223,10 +223,25 @@ async def _update_site(site, animes_path, episodes_path):
     return await fetcher.run()
 
 async def run_full_update():
-    success = True
+    print("--- Updating catalogs (Ecchicix & Animecix merged) ---")
     
-    # User strictly requested ONLY ecchicix, so we drop animecix completely!
-    if not await _update_site("ecchicix", ECCHICIX_ANIMES, ECCHICIX_EPISODES):
-        success = False
-
-    return success
+    # We will scrape both, but merge them into ecchicix files
+    ecchi_animes = await _scrape_catalog("ecchicix")
+    anime_animes = await _scrape_catalog("animecix")
+    
+    merged_dict = {}
+    for a in anime_animes:
+        merged_dict[str(a["id"])] = a
+    for a in ecchi_animes:
+        merged_dict[str(a["id"])] = a
+        
+    all_animes = sorted(merged_dict.values(), key=lambda x: x["id"])
+    print(f"  [Merge] Saved {len(all_animes)} merged IDs.")
+    
+    with open(ECCHICIX_ANIMES, "w", encoding="utf-8") as f:
+        import json
+        json.dump(all_animes, f, ensure_ascii=False, indent=2)
+        
+    ecchi_fetcher = DetailFetcher("ecchicix", ECCHICIX_ANIMES, ECCHICIX_EPISODES)
+    await ecchi_fetcher.run()
+    return True
