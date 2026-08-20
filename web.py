@@ -594,31 +594,9 @@ def run_search(query):
     except Exception as e:
         print(f"[run_search] Error: {e}")
 
-    # Filter out sequels/OVAs if the root franchise is already in the results
-    # Sort by length so the shortest title (root) comes first
-    local.sort(key=lambda x: len(x[1]))
-    
-    filtered_local = []
-    for item in local:
-        slug, t = item
-        t_lower = t.lower()
-        is_extension = False
-        
-        for _, k in filtered_local:
-            k_lower = k.lower()
-            if t_lower.startswith(k_lower):
-                if len(t_lower) == len(k_lower) or t_lower[len(k_lower)] in ' :;-.,!?':
-                    is_extension = True
-                    break
-        
-        if not is_extension:
-            filtered_local.append(item)
-            
-    # Sort back by some relevance if needed?
-    original_order = {item[0]: i for i, item in enumerate(local)}
-    filtered_local.sort(key=lambda x: original_order[x[0]])
-
-    return filtered_local
+    # Return the raw deduplicated results. 
+    # Do not group by franchise prefix, as it causes false positives.
+    return local
 
 # ---- Watchlist API ----
 WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anime data", "watchlist.json")
