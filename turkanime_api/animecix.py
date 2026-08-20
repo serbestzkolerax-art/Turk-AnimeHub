@@ -81,10 +81,10 @@ _ANIME_BY_TITLE = {}
 _ANIME_TITLE_BY_ID = {}
 for a in _ANIMES:
     a["id"] = str(a["id"])
-    key = a.get("title", "").strip().lower()
+    key = (a.get("title") or a.get("name") or "").strip().lower()
     if key:
-        _ANIME_BY_TITLE.setdefault(key, []).append((a["id"], a["title"]))
-        _ANIME_TITLE_BY_ID[a["id"]] = a["title"]
+        _ANIME_BY_TITLE.setdefault(key, []).append((a["id"], a.get("title") or a.get("name")))
+        _ANIME_TITLE_BY_ID[a["id"]] = a.get("title") or a.get("name")
 
 _EPISODE_BY_ID = {str(item["id"]): item for item in _EPISODES}
 
@@ -138,10 +138,10 @@ def reload_catalog():
     _ANIME_TITLE_BY_ID.clear()
     for a in _ANIMES:
         a["id"] = str(a["id"])
-        key = a.get("title", "").strip().lower()
+        key = (a.get("title") or a.get("name") or "").strip().lower()
         if key:
-            _ANIME_BY_TITLE.setdefault(key, []).append((a["id"], a["title"]))
-            _ANIME_TITLE_BY_ID[a["id"]] = a["title"]
+            _ANIME_BY_TITLE.setdefault(key, []).append((a["id"], a.get("title") or a.get("name")))
+            _ANIME_TITLE_BY_ID[a["id"]] = a.get("title") or a.get("name")
     _EPISODE_BY_ID = {str(item["id"]): item for item in _EPISODES}
     print(f"[Data] Reloaded: {len(_ANIMES)} anime, {len(_EPISODES)} episodes")
 

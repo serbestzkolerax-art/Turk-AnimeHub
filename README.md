@@ -1,24 +1,23 @@
 # Turk-AnimeHub
 
-Bu proje, farklÄ± kaynaklardan (AnimeDepo, Animecix, OpenAni, Anizle vb.) anime bÃ¶lÃ¼mlerini Ã§eken ve modern bir web arayÃ¼zÃ¼ ile sunan kapsamlÄ± bir platformdur.
+Bu proje, farklı kaynaklardan (AnimeDepo, Animecix, Ecchicix vb.) anime bölümlerini çeken ve modern bir web arayüzü ile sunan kapsamlı bir platformdur.
 
-## Ã–zellikler
-- **Kesintisiz Deneyim:** BÃ¶lÃ¼mler iÃ§in en hÄ±zlÄ± ve stabil olan kaynaktan (Ã¶rn. OpenAni) otomatik video alÄ±nÄ±r. 
-- **Otomatik GeÃ§iÅŸ & Auto-Skip:** KÄ±rÄ±k veya Ã§alÄ±ÅŸmayan video oynatÃ±cÄ±lar tespit edilip anÄ±nda bir sonraki saÄŸlayÄ±cÄ±ya (fansub/player) geÃ§ilir.
-- **Kronolojik SÄ±ralama:** AniList GraphQL API'si kullanÄ±larak animelerin OVA, prequel ve sequel bÃ¶lÃ¼mleri otomatik olarak izleme sÄ±rasÄ±na gÃ¶re dizilir.
-- **AkÄ±llÄ± Arama:** Seriler otomatik olarak gruplandÄ±rÄ±lÄ±r, sadece ana animeler gÃ¶sterilerek arama sonuÃ§larÄ±ndaki karmaÅŸa Ã¶nlenir.
-- **GeliÅŸmiÅŸ Medya OynatÄ±cÄ± (Player):** Tam ekranda bile gÃ¶zÃ¼ken Netflix tarzÄ± "Sonraki BÃ¶lÃ¼m" butonu ve seÃ§tiÄ±ÄŸiniz oynatÄ±cÄ±yÄ± (player & fansub) sonraki bÃ¶lÃ¼mlerde de hatÄ±rlayan akÄ±llÄ± sistem.
-- **MyAnimeList Entegrasyonu:** Kapak fotoÄŸraflarÄ±, puanlar ve sezon bilgileri MAL Ã¼zerinden en yÃ¼ksek kalitede Ã§ekilir.
-- **ÃŒzleme Listesi (Watchlist):** BeÄŸendiÄŸiniz animeleri listeleyebilir ve takip edebilirsiniz.
-- **Otomatik BirleÅŸtirme (Episode Merging):** Emsalsiz altyapÄ±sÄ± sayesinde, farklÄ± kaynaklarda (Animedepo, Animecix vs.) eksik olan bÃ¶lÃ¼mler tespit edilir ve canlÄ± kaynaklardan (OpenAni vb.) alÄ±narak kusursuz bir sezon listesi sunulur.
+## Özellikler
+- **Kesintisiz Deneyim:** Bölümler için en hızlı ve stabil olan kaynaktan (örn. OpenAni) otomatik video alınır. 
+- **Otomatik Geçiş & Auto-Skip:** Kırık veya çalışmayan video oynatıcılar tespit edilip anında bir sonraki sağlayıcıya (fansub/player) geçilir.
+- **Gelişmiş Kronolojik Sıralama:** AniList GraphQL API'si kullanılarak animelerin OVA, prequel ve sequel bölümleri otomatik olarak izleme sırasına göre dizilir. AniList'te eksik olan 'Özel Bölümler' veya 'OVA'lar (örn. One Punch Man 2nd Season Commemorative Special), AnimeDepo veritabanıyla çapraz referanslanarak doğru sezonun altına otomatik olarak dahil edilir.
+- **Akıllı Arama:** Seriler otomatik olarak gruplandırılır, OVA'lar arama çubuğundan gizlenerek sadece ana animeler gösterilir. Karmaşaya son verilir.
+- **Hızlı Yerel Veritabanı:** 2600'den fazla anime ve bölümleri önbelleğe alınmış yerel JSON dosyalarından anında çekilir, canlı (live) kaynak aramalarındaki bekleme süreleri sıfıra indirilmiştir.
+- **Gelişmiş Medya Oynatıcı (Player):** Tam ekranda bile gözüken Netflix tarzı "Sonraki Bölüm" butonu ve seçtiğiniz oynatıcıyı (player & fansub) sonraki bölümlerde de hatırlayan akıllı sistem.
+- **İzleme Listesi (Watchlist):** Beğendiğiniz animeleri listeleyebilir ve takip edebilirsiniz.
 
 ## Kurulum
-1. Gerekli kÃ¼tÃ¼phaneleri kurun: `pip install -r requirements.txt`
-2. UygulamayÄ± baÅŸlatÄ±n: `python web.py`
-3. TarayÄ±cÄ±nÄ±zda `http://127.0.0.1:5000` adresine gidin.
+1. Gerekli kütüphaneleri kurun: \pip install -r requirements.txt\
+2. Uygulamayı başlatın: \python web.py\
+3. Tarayıcınızda \http://127.0.0.1:5000\ adresine gidin.
 
-## TeÅŸekkÃ¼rler (Credits)
-Bu projenin arka plan arama ve saÄŸlayÄ±cÄ± mimarisinde aÅŸaÄŸÄ±daki aÃ§Ä±k kaynaklÄ± projelerden esinlenilmiÅŸ ve kod faydalanÄ±lmÄ±ÅŸtÄ±r:
+## Teşekkürler (Credits)
+Bu projenin arka plan arama ve sağlayıcı mimarisinde aşağıdaki açık kaynaklı projelerden esinlenilmiş ve kod faydalanılmıştır:
 - [turkanime-indirici](https://github.com/KebabLord/turkanime-indirici)
 - [AnimecixScraper](https://github.com/requi5m/AnimecixScraper)
 - [turkanime-gui](https://github.com/barkeser2002/turkanime-gui/)
