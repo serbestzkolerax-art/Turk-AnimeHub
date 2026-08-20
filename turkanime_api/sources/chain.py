@@ -63,18 +63,20 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
     seen = set()
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fast_sources)) as executor:
-        futures = {executor.submit(_do_search, name): name for name in fast_sources}
-        for future in concurrent.futures.as_completed(futures):
-            name, items = future.result()
-            for slug, title in items:
-                if is_good_match(slug, title):
-                    norm = title.lower().strip()
-                    if norm not in seen:
-                        seen.add(norm)
-                        if str(slug).startswith("ecchi_"):
-                            phase1_results.append((slug, title))
-                        else:
-                            phase1_results.append((f"{name}:{slug}", title))
+        futures = {name: executor.submit(_do_search, name) for name in fast_sources}
+        # Process in the exact order of fast_sources to prioritize animedepo
+        for name in fast_sources:
+            if name in futures:
+                _, items = futures[name].result()
+                for slug, title in items:
+                    if is_good_match(slug, title):
+                        norm = title.lower().strip()
+                        if norm not in seen:
+                            seen.add(norm)
+                            if str(slug).startswith("ecchi_"):
+                                phase1_results.append((slug, title))
+                            else:
+                                phase1_results.append((f"{name}:{slug}", title))
                         
     if phase1_results:
         phase1_results.sort(key=sort_key, reverse=True)

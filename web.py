@@ -551,11 +551,11 @@ def _merge_all_episodes_for_title(title):
                 sn, en = parse_sn_en(ep_slug, ep_title)
                 
                 # ENFORCE ANIMEDEPO STRUCTURE ONLY FOR LOCAL ECCI:
-                # if is_cix and depo_limits:
-                #     if sn not in depo_limits:
-                #         continue
-                #     if en > depo_limits[sn]:
-                #         continue
+                if is_cix and depo_limits:
+                    if sn not in depo_limits:
+                        continue
+                    if en > depo_limits[sn]:
+                        continue
                     
                 original_en = en
                 if original_en == 0.0:

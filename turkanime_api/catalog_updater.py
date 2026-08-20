@@ -198,6 +198,11 @@ async def _update_site(site, animes_path, episodes_path):
 async def run_full_update():
     success = True
     
+    animes_json = os.path.join(_DATA_DIR, "animes.json")
+    episodes_json = os.path.join(_DATA_DIR, "episodes.json")
+    
+    if not await _update_site("animecix", animes_json, episodes_json):
+        success = False
     if not await _update_site("ecchicix", ECCHICIX_ANIMES, ECCHICIX_EPISODES):
         success = False
 
