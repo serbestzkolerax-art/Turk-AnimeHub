@@ -16,7 +16,7 @@
         </div>
     </div>
 
-{% if results %}
+{% if results is not none %}
     <h2 class="text-xl font-bold mb-6 text-gray-200 border-l-4 border-indigo-500 pl-3">Arama Sonuçları: "{{ query }}"</h2>
     {% if results|length == 0 %}
         <div class="text-center py-12 text-gray-400">Sonuç bulunamadı.</div>
