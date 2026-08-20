@@ -25,7 +25,9 @@ def search_all(query: str, limit: int = 10, skip_depo: bool = False) -> List[Tup
 
     def is_good_match(title):
         score = _score(title)
-        return score > 0.7
+        if score < 1.0:
+            return score > 0.85
+        return True
 
     def sort_key(item):
         prefix_slug, title = item

@@ -501,12 +501,36 @@ def _merge_all_episodes_for_title(title):
         except Exception:
             return []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    def fetch_live():
+        try:
+            from turkanime_api.sources import chain as live_chain
+            live_results = live_chain.search_all(title, limit=3, skip_depo=True)
+            eps_to_return = []
+            for slug, res_title in live_results:
+                if _is_title_match(res_title, title):
+                    prov = slug.split(':')[0]
+                    if prov.lower() == 'animecix': continue
+                    from turkanime_api.sources import anizle, openani, animely
+                    mod_map = {'anizle': anizle, 'openani': openani, 'animely': animely}
+                    p_mod = mod_map.get(prov.lower())
+                    if p_mod and hasattr(p_mod, 'get_anime_episodes'):
+                        peps = p_mod.get_anime_episodes(slug.split(':', 1)[1])
+                        if peps:
+                            for ep_slug, ep_t in peps:
+                                eps_to_return.append((f"{prov}:{slug.split(':',1)[1]}::{ep_slug}", ep_t))
+                            break
+            return eps_to_return
+        except Exception:
+            return []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_local = executor.submit(fetch_local)
         f_depo = executor.submit(fetch_depo)
+        f_live = executor.submit(fetch_live)
         
         depo_eps = f_depo.result()
         local_eps = f_local.result()
+        live_eps = f_live.result()
         
         depo_limits = {}
         for ep_slug, ep_title in depo_eps:
@@ -514,12 +538,12 @@ def _merge_all_episodes_for_title(title):
             depo_limits[sn] = max(depo_limits.get(sn, 0.0), en)
             all_eps[(sn, en)] = (ep_slug, ep_title)
             
-        for eps in [local_eps]:
+        for eps, is_cix in [(local_eps, True), (live_eps, False)]:
             for ep_slug, ep_title in eps:
                 sn, en = parse_sn_en(ep_slug, ep_title)
                 
-                # ENFORCE ANIMEDEPO STRUCTURE:
-                if depo_limits:
+                # ENFORCE ANIMEDEPO STRUCTURE ONLY FOR LOCAL ECCI:
+                if is_cix and depo_limits:
                     if sn not in depo_limits:
                         continue
                     if en > depo_limits[sn]:
